@@ -180,7 +180,7 @@ def create_test_summary_workbook_01() -> Workbook:
     ws.cell(row=1, column=1, value='节气名')
     ws.cell(row=1, column=2, value='冬至')
     ws.cell(row=2, column=1, value='会议总时长')
-    ws.cell(row=2, column=2, value='40')
+    ws.cell(row=2, column=2, value='60')
 
     ws = wb.create_sheet(TEST_GROUP_NAME_01)
     ws.cell(row=1, column=1, value='中乾组（3人）')
@@ -339,20 +339,20 @@ def test_filter_unmatched_attendance_infos_01():
 
 
 def test_parse_meeting_info_01():
-    result = parse_meeting_info((Cell('节气'), Cell('冬至')))
+    result = parse_meeting_info((Cell('节气名'), Cell('冬至')))
     expected = ('solar_term', '冬至')
     assert expected == result
 
 
 def test_parse_meeting_info_02():
-    result = parse_meeting_info((Cell('时长'), Cell('1:55:10')))
-    expected = ('meeting_time', time(1, 55, 10))
+    result = parse_meeting_info((Cell('会议总时长'), Cell('60')))
+    expected = ('meeting_time', time(0, 40))
     assert expected == result
 
 
 def test_parse_meeting_info_sheet_01():
     result = parse_meeting_info_sheet(TEST_SUMMARY_WB_01[MEETING_INFO_SHEET_NAME])
-    expected = MeetingInfo('冬至', time(0, 40, 0))
+    expected = MeetingInfo('冬至', time(0, 40))
     assert expected == result
 
 
@@ -382,16 +382,6 @@ def test_is_enough_attendance_time_03():
         ),
     )
     assert result is False
-
-
-def test_partition_by_time_01():
-    result = partition_by_time(
-        TEST_MEETING_INFO_01,
-        (
-            get_test_personeel_infos_01(), get_test_attendance_infos_01()
-        )
-    )
-    # pprint(result)
 
 
 def test_partition_present_01():
@@ -552,6 +542,7 @@ def test_generate_team_commands_01():
         TEST_TEAM_LOCATION_01, TEST_TEAM_ATTENDANCE_INFOS_01
     )
     expected = (
+        (1, 1, '中乾组（3人）', False),
         (2, 3, '人员1(中乾0人员1)', True),
         (2, 4, '00:30:00', True),
         (3, 3, '人员3&人员4(中乾2人员3＆中坤0人员4)', False),

@@ -15,7 +15,7 @@ from meeting_comm import (
 
 
 TEST_GRAPH_RULE_01 = GraphRule('output', 'input', partial(add, 1))
-TEST_GRAPH_RULE_02 = GraphRule('output', ('input0', 'input1'), add)
+TEST_GRAPH_RULE_02 = GraphRule('output', ('input0', 'input1'), starapply(add))
 TEST_GRAPH_RULE_03 = GraphRule(
     ('output0', 'output1'), ('input0', 'input1', 'input2'), pipe(
         tuple_args,

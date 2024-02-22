@@ -8,7 +8,6 @@ import re
 from datetime import time
 from functools import partial
 from itertools import chain, count, filterfalse, groupby, repeat, starmap
-from math import ceil
 from operator import (
     add, attrgetter, contains, eq, floordiv, ge,
     itemgetter, methodcaller, mod, mul, not_
