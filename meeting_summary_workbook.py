@@ -10,7 +10,7 @@ from functools import partial
 from itertools import chain, count, filterfalse, groupby, repeat, starmap
 from operator import (
     add, attrgetter, contains, eq, floordiv, ge,
-    itemgetter, methodcaller, mod, mul, not_
+    itemgetter, methodcaller, mod, mul, not_, sub
 )
 from typing import NamedTuple, Tuple
 
@@ -190,6 +190,7 @@ convert_meeting_info_sheet = pipe(
 # int -> int
 get_enough_meeting_time = pipe(
     partial(mul, 2/3),
+    partial(swap_args(sub), 10),
     int,
 )
 
@@ -717,7 +718,7 @@ group_attendance_sheet_to_team_locations = pipe(
 )
 
 # 生成出席指令
-# Tuple[int, PersoneelAttendanceInfo, bool]
+# Tuple[int, int, PersoneelAttendanceInfo, bool]
 # ->
 # $[FillCommand, ...]
 generate_present_command = pipe(
@@ -725,9 +726,18 @@ generate_present_command = pipe(
         pipe(
             dispatch(
                 itemgetter(0),
+                constant(2),
+                itemgetter(1),
+                constant(False)
+            ),
+            tuple,
+        ),
+        pipe(
+            dispatch(
+                itemgetter(0),
                 constant(3),
-                pipe(itemgetter(1), itemgetter(1), attrgetter('origin_name')),
-                itemgetter(2)
+                pipe(itemgetter(2), itemgetter(1), attrgetter('origin_name')),
+                constant(False)
             ),
             tuple,
         ),
@@ -736,10 +746,10 @@ generate_present_command = pipe(
                 itemgetter(0),
                 constant(4),
                 pipe(
-                    itemgetter(1), itemgetter(1), attrgetter('attendance_time'),
+                    itemgetter(2), itemgetter(1), attrgetter('attendance_time'),
                     methodcaller('strftime', '%H:%M:%S'),
                 ),
-                itemgetter(2)
+                itemgetter(3)
             ),
             tuple,
         ),
@@ -752,13 +762,14 @@ generate_present_command = pipe(
 # Tuple[Tuple[int, int, str, str, bool], ...]
 generate_present_commands = pipe(
     tuple_args,
-    cross(
-        pipe(itemgetter(1), partial(add, 1), count),
-        identity,
-        identity,
+    dispatch(
+        pipe(itemgetter(0), itemgetter(1), partial(add, 1), count),
+        pipe(constant(1), count),
+        itemgetter(1),
+        itemgetter(2),
     ),
     starapply(zip),
-    # $Tuple[int, PersoneelInfo, bool]
+    # $Tuple[int, int, PersoneelInfo, bool]
     partial(map, generate_present_command),
     chain.from_iterable,
     tuple,
