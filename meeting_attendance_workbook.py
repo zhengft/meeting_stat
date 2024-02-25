@@ -102,7 +102,7 @@ parse_attendance_info = pipe(
     partial(map, attrgetter('value')),
     cross(
         pipe(get_nickname, partial(re.split, r'＆|&')),
-        pipe(get_nickname, repeat),
+        repeat,
         repeat,
     ),
     starapply(zip),

@@ -18,7 +18,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from meeting_attendance_workbook import (
-    AttendanceInfo, OVERVIEW_OF_MEMBER_ATTENDANCE, parse_attendance_sheet
+    AttendanceInfo, OVERVIEW_OF_MEMBER_ATTENDANCE,
+    get_nickname, parse_attendance_sheet
 )
 from meeting_comm import (
     debug, Cell, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
@@ -736,7 +737,10 @@ generate_present_command = pipe(
             dispatch(
                 itemgetter(0),
                 constant(3),
-                pipe(itemgetter(2), itemgetter(1), attrgetter('origin_name')),
+                pipe(
+                    itemgetter(2), itemgetter(1),
+                    attrgetter('origin_name'), get_nickname
+                ),
                 constant(False)
             ),
             tuple,
@@ -769,7 +773,7 @@ generate_present_commands = pipe(
         itemgetter(2),
     ),
     starapply(zip),
-    # $Tuple[int, int, PersoneelInfo, bool]
+    # $Tuple[int, int, PersoneelAttendanceInfo, bool]
     partial(map, generate_present_command),
     chain.from_iterable,
     tuple,
@@ -843,14 +847,33 @@ generate_absent_command = pipe(
 # Tuple[Tuple[int, int, str, str, bool], ...]
 generate_absent_commands = pipe(
     tuple_args,
-    cross(
-        pipe(itemgetter(1), partial(add, 1), count),
-        identity,
+    dispatch(
+        pipe(
+            cross(
+                pipe(itemgetter(1), partial(add, 1), count),
+                identity,
+            ),
+            starapply(zip),
+            # $Tuple[int, PersoneelInfo]
+            partial(map, generate_absent_command),
+            tuple,
+        ),
+        pipe(
+            itemgetter(0),
+            itemgetter(1),
+            partial(add, 1),
+            dispatch(
+                identity,
+                constant(1),
+                constant('全勤'),
+                constant(False),
+            ),
+            tuple,
+            to_stream,
+        ),
     ),
-    starapply(zip),
-    # $Tuple[int, PersoneelInfo]
-    partial(map, generate_absent_command),
     tuple,
+    if_(itemgetter(0), itemgetter(0), itemgetter(1)),
 )
 
 # 生成标题指令
@@ -866,8 +889,7 @@ generate_title_command = pipe(
                     itemgetter(0),
                     itemgetter(0),
                     '{0}组（{{0}}人）'.format,
-                    attrgetter('format'),
-                    # str.format
+                    attrgetter('format'),  # str.format
                 ),
                 pipe(
                     itemgetter(1),
