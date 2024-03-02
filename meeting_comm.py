@@ -38,7 +38,13 @@ class Cell(NamedTuple):
 A = TypeVar('A')
 B = TypeVar('B')
 
-Targets = Union[str, Tuple[str, ...]]
+
+class Chain(tuple):
+    """顺序调用链。"""
+
+
+Targets = Union[str, Tuple[str, ...], Chain]
+
 
 class GraphRule(NamedTuple):
     outputs: Targets

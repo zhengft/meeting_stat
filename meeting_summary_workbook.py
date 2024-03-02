@@ -7,7 +7,9 @@ import os
 import re
 from datetime import time
 from functools import partial
-from itertools import chain, count, filterfalse, groupby, repeat, starmap
+from itertools import (
+    chain, count, filterfalse, groupby, pairwise, repeat, starmap
+)
 from operator import (
     add, attrgetter, contains, eq, floordiv, ge,
     itemgetter, methodcaller, mod, mul, not_, sub
@@ -22,7 +24,7 @@ from meeting_attendance_workbook import (
     get_nickname, parse_attendance_sheet
 )
 from meeting_comm import (
-    debug, Cell, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
+    debug, Cell, Chain, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
     MEETING_ATTENDANCE_FILENAME, SUFFIX_NUMBER, StatError,
     constant, cross, dispatch, ensure, eval_graph, identity, if_, invoke,
     islice_, make_graph, partition, pipe, raise_, side_effect, starapply,
@@ -80,6 +82,8 @@ class MeetingInfo(NamedTuple):
 
 
 FillCommand = Tuple[int, int, str, bool]
+
+create_fill_command = tuple
 
 
 MEETING_INFO_KEYS = {
@@ -699,7 +703,7 @@ group_attendance_sheet_to_team_locations = pipe(
     partial(
         map,
         pipe(
-            itemgetter(0), attrgetter('value'),
+            itemgetter(0), attrgetter('value'), str,
             if_(bool, TEAM_NAME_REGEX.match, constant(None)),
         ),
     ),
@@ -1032,6 +1036,84 @@ generate_mismatched_commands = pipe(
     chain.from_iterable,
 )
 
+# 添加团队定位尾部
+# Tuple[TeamLocation, ...] -> $[TeamLocation, ...]
+add_team_locations_tail = pipe(
+    dispatch(
+        identity,
+        pipe(
+            itemgetter(-1),
+            itemgetter(1),
+            partial(add, 10),
+            dispatch(
+                constant('尾部'),
+                identity,
+            ),
+            starapply(TeamLocation),
+            to_stream,
+        ),
+    ),
+    chain.from_iterable,
+)
+
+generate_clean_commands_by_lineno = dispatch(
+    pipe(
+        dispatch(
+            identity,
+            constant(1),
+            constant(''),
+            constant(False),
+        ),
+        create_fill_command,
+    ),
+    pipe(
+        dispatch(
+            identity,
+            constant(2),
+            constant(''),
+            constant(False),
+        ),
+        create_fill_command,
+    ),
+    pipe(
+        dispatch(
+            identity,
+            constant(3),
+            constant(''),
+            constant(False),
+        ),
+        create_fill_command,
+    ),
+    pipe(
+        dispatch(
+            identity,
+            constant(4),
+            constant(''),
+            constant(False),
+        ),
+        create_fill_command,
+    ),
+)
+
+# 生成表格清理指令
+# $[TeamLocation, ...] -> $[FillCommand, ...]
+generate_clean_commands = pipe(
+    pairwise,
+    partial(
+        map,
+        pipe(
+            cross(
+                pipe(itemgetter(1), partial(add, 1)),
+                itemgetter(1),
+            ),
+            starapply(range),
+            partial(map, generate_clean_commands_by_lineno),
+            chain.from_iterable,
+        )
+    ),
+    chain.from_iterable,
+)
+
 # 填充单元格
 # Tuple[WorksheetCell, FillCommand] -> None
 fill_workcell = pipe(
@@ -1114,12 +1196,26 @@ GRAPH_GROUP_SHEET = make_graph(
         group_attendance_sheet_to_team_locations
     ),
     (
+        'team_locations_with_tail', 'team_locations', add_team_locations_tail
+    ),
+    (
+        'clean_commands', 'team_locations_with_tail', generate_clean_commands
+    ),
+    (
         'team_commands', ('team_locations', 'group_attendance_info'),
         generate_team_commands_by_locations_and_group_info
     ),
     (
-        'fill_commands', ('group_attendance_sheet', 'team_commands'),
+        'fill_clean_commands', ('group_attendance_sheet', 'clean_commands'),
         fill_worksheet_commands
+    ),
+    (
+        'fill_team_commands', ('group_attendance_sheet', 'team_commands'),
+        fill_worksheet_commands
+    ),
+    (
+        'fill_commands', Chain(('fill_clean_commands', 'fill_team_commands')),
+        identity
     ),
 )
 
