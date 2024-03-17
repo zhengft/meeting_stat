@@ -16,6 +16,7 @@ from meeting_comm import (
 
 
 OVERVIEW_OF_MEMBER_ATTENDANCE = '成员参会概况'
+DETAIL_OF_MEMBER_ATTENDANCE = '成员参会明细'
 
 
 class AttendanceInfo(NamedTuple):
@@ -23,7 +24,14 @@ class AttendanceInfo(NamedTuple):
     nickname: str
     origin_name: str
     attendance_time: time
-    merged: bool
+    merged: bool = False
+
+
+# 创建原始的出席信息
+create_origin_attendance_info = pipe(
+    tuple_args,
+    starapply(AttendanceInfo),
+)
 
 
 AttendanceInfos = Tuple[AttendanceInfo, ...]
@@ -38,7 +46,6 @@ USERNAME_REGEX = re.compile(r'.*\((.+?)\)')
 def add_time(a: time, b: time) -> time:
     """时间相加。"""
     second = a.second + b.second
-    # breakpoint()
     minute = a.minute + b.minute + second // 60
     hour = a.hour + b.hour + minute // 60
     return time(hour, minute % 60, second % 60)
@@ -86,18 +93,6 @@ convert_detail_sheet = pipe(
     tuple,
 )
 
-
-# 创建原始的出席信息
-create_origin_attendance_info = pipe(
-    tuple_args,
-    dispatch(
-        identity,
-        pipe(constant(False), to_stream),
-    ),
-    chain.from_iterable,
-    starapply(AttendanceInfo),
-)
-
 # 解析人员信息
 # Tuple[Cell, ...] -> Iterator[AttendanceInfo]
 parse_attendance_info = pipe(
@@ -125,37 +120,74 @@ parse_attendance_info = pipe(
     partial(map, create_origin_attendance_info),
 )
 
-# 合并同名的参会信息
-# Iterator[AttendanceInfo] -> AttendanceInfo
-merge_attendance_infos = pipe(
-    tuple,
-    if_(
-        pipe(len, partial(ge, 1)),
+# 解析成员参会明细条目
+# Tuple[Cell, ...] -> Iterator[AttendanceInfo]
+parse_attendance_detail_info = pipe(
+    tuple_args,
+    dispatch(
         itemgetter(0),
+        itemgetter(0),
+        itemgetter(3),
+    ),
+    partial(map, attrgetter('value')),
+    cross(
+        pipe(get_nickname, partial(re.split, r'＆|&')),
+        repeat,
+        repeat,
+    ),
+    starapply(zip),
+    partial(
+        map,
         pipe(
-            dispatch(
-                pipe(itemgetter(0), attrgetter('nickname')),
-                pipe(itemgetter(0), attrgetter('origin_name')),
-                pipe(
-                    partial(map, attrgetter('attendance_time')),
-                    partial(reduce, add_time),
-                ),
-                constant(True),
+            cross(
+                normalize_nickname,
+                identity,
+                parse_time,
             ),
-            starapply(AttendanceInfo),
+            create_origin_attendance_info,
         ),
     ),
 )
 
-# 解析“成员参会概况”
-# Worksheet -> Tuple[AttendanceInfo, ...]
-parse_attendance_sheet = pipe(
-    convert_overview_sheet,
-    partial(map, parse_attendance_info),
+
+def merge_attendance_info(left: AttendanceInfo,
+                          right: AttendanceInfo) -> AttendanceInfo:
+    """合并同名的参会信息。"""
+    return AttendanceInfo(
+        left.nickname,
+        left.origin_name,
+        add_time(left.attendance_time, right.attendance_time),
+        True
+    )
+
+
+# 解析参会页签
+parse_attendance_sheet = lambda convert_func, parse_func: pipe(
+    convert_func,
+    partial(map, parse_func),
     chain.from_iterable,
     partial(sorted, key=attrgetter('nickname')),
     partial(groupby, key=attrgetter('nickname')),
-    partial(map, itemgetter(1)),
-    partial(map, merge_attendance_infos),
+    partial(
+        map,
+        pipe(
+            itemgetter(1),
+            partial(reduce, merge_attendance_info),
+        )
+    ),
     tuple,
+)
+
+
+# 解析“成员参会概况”
+# Worksheet -> Tuple[AttendanceInfo, ...]
+parse_attendance_overview_sheet = parse_attendance_sheet(
+    convert_overview_sheet, parse_attendance_info
+)
+
+
+# 解析“成员参会明细”
+# Worksheet -> Tuple[AttendanceInfo, ...]
+parse_attendance_detail_sheet = parse_attendance_sheet(
+    convert_detail_sheet, parse_attendance_detail_info
 )
