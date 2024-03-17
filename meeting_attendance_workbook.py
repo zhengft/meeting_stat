@@ -78,6 +78,14 @@ convert_overview_sheet = pipe(
     tuple,
 )
 
+# 转换“成员参会明细”表为内部数据结构
+# Worksheet -> Tuple[Tuple[Cell, ...], ...]
+convert_detail_sheet = pipe(
+    methodcaller('iter_rows', min_row=10, max_col=5, values_only=True),
+    partial(map, pipe(partial(map, Cell), tuple)),
+    tuple,
+)
+
 
 # 创建原始的出席信息
 create_origin_attendance_info = pipe(

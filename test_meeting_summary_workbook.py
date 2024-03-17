@@ -33,7 +33,7 @@ from meeting_summary_workbook import (
     is_enough_attendance_time,
     is_person_present,
     item_extract,
-    organize_infos,
+    calc_group_attendance_infos,
     parse_meeting_info,
     parse_meeting_info_sheet,
     parse_personnel_info, parse_people_sheet,
@@ -180,7 +180,7 @@ def create_test_summary_workbook_01() -> Workbook:
     ws.cell(row=1, column=1, value='节气名')
     ws.cell(row=1, column=2, value='冬至')
     ws.cell(row=2, column=1, value='会议总时长')
-    ws.cell(row=2, column=2, value='60')
+    ws.cell(row=2, column=2, value='75')
 
     ws = wb.create_sheet(TEST_GROUP_NAME_01)
     ws.cell(row=1, column=1, value='中乾组（3人）')
@@ -345,7 +345,7 @@ def test_parse_meeting_info_01():
 
 
 def test_parse_meeting_info_02():
-    result = parse_meeting_info((Cell('会议总时长'), Cell('60')))
+    result = parse_meeting_info((Cell('会议总时长'), Cell('75')))
     expected = ('meeting_time', time(0, 40))
     assert expected == result
 
@@ -394,7 +394,7 @@ def test_partition_present_01():
 
 
 def test_partition_infos_01():
-    a, b, c, d = partition_infos(
+    a, b, c = partition_infos(
         TEST_MEETING_INFO_01,
         get_test_personeel_infos_01(),
         get_test_attendance_infos_01()
@@ -402,7 +402,6 @@ def test_partition_infos_01():
     assert 2 == len(a)
     assert 1 == len(b)
     assert 3 == len(c)
-    assert 1 == len(d)
 
 
 def test_get_group_teams_by_personeel_infos_01():
@@ -472,18 +471,12 @@ def test_group_infos_by_team_01():
     assert expected == result
 
 
-def test_organize_infos_01():
-    result = organize_infos(
+def test_calc_group_attendance_infos_01():
+    result_groups = calc_group_attendance_infos(
         TEST_MEETING_INFO_01,
         get_test_personeel_infos_01(),
         get_test_attendance_infos_01()
     )
-    a, b, c, d = partition_infos(
-        TEST_MEETING_INFO_01,
-        get_test_personeel_infos_01(),
-        get_test_attendance_infos_01()
-    )
-    result_groups = result[0]
     assert 2 == len(result_groups)
     assert ('大组0', '大组1') == tuple(result_groups)
     assert ('中乾', '中坤') == tuple(result_groups['大组0'])
@@ -500,7 +493,6 @@ def test_organize_infos_01():
     assert 0 == len(result_groups['大组1']['上乾'][1])
     assert 0 == len(result_groups['大组1']['上乾'][2])
     assert 1 == len(result_groups['大组1']['上乾'][3])
-    assert d == result[1]
     # pprint(result)
 
 def test_group_attendance_sheet_to_team_locations_01():
@@ -516,14 +508,15 @@ def test_generate_present_commands_01():
         TEST_TEAM_LOCATION_01, (
             (TEST_PERSONEEL_INFO_01, TEST_ATTENDANCE_INFO_01),
             (TEST_PERSONEEL_INFO_03, TEST_ATTENDANCE_INFO_03),
-            
         ),
         (True, False),
     )
     expected = (
-        (2, 3, '人员1(中乾0人员1)', True),
+        (2, 2, 1, False),
+        (2, 3, '中乾0人员1', False),
         (2, 4, '00:30:00', True),
-        (3, 3, '人员3&人员4(中乾2人员3＆中坤0人员4)', False),
+        (3, 2, 2, False),
+        (3, 3, '中乾2人员3＆中坤0人员4', False),
         (3, 4, '00:40:00', False),
     )
     assert expected == result
@@ -543,9 +536,11 @@ def test_generate_team_commands_01():
     )
     expected = (
         (1, 1, '中乾组（3人）', False),
-        (2, 3, '人员1(中乾0人员1)', True),
+        (2, 2, 1, False),
+        (2, 3, '中乾0人员1', False),
         (2, 4, '00:30:00', True),
-        (3, 3, '人员3&人员4(中乾2人员3＆中坤0人员4)', False),
+        (3, 2, 2, False),
+        (3, 3, '中乾2人员3＆中坤0人员4', False),
         (3, 4, '00:40:00', False),
         (2, 1, '中乾0人员1', False),
         (3, 1, '中乾1人员2', False),

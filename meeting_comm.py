@@ -171,6 +171,11 @@ def to_stream(value: A) -> Iterator[A]:
     yield value
 
 
+def create_tuple(*args) -> Tuple:
+    """创建元组。"""
+    return tuple(args)
+
+
 def tuple_args(*args) -> Tuple:
     """入参转换为元组。用于标准化多参函数的入参。"""
     if len(args) == 1:

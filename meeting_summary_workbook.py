@@ -287,32 +287,13 @@ is_person_present = pipe(
 
 # 由一对一关系生成一对多关系
 # Callable[[A, B], C] -> Callable[[A, Iterator[B]], Iterator[C]]
-# func -> pipe(
-#     dispatch(
-#         pipe(itemgetter(0), repeat),
-#         itemgetter(1),
-#     ),
-#     starapply(zip),
-#     partial(starmap, func),
-# )
-one_more_relation = pipe(
+one_more_relation = lambda func: pipe(
     dispatch(
-        constant(
-            dispatch(
-                pipe(itemgetter(0), repeat),
-                itemgetter(1),
-            ),
-        ),
-        constant(starapply(zip)),
-        pipe(
-            dispatch(
-                constant(starmap),
-                identity,
-            ),
-            starapply(partial),
-        ),
+        pipe(itemgetter(0), repeat),
+        itemgetter(1),
     ),
-    starapply(pipe),
+    starapply(zip),
+    partial(starmap, func),
 )
 
 # 参会信息是否有匹配的人员
@@ -453,7 +434,7 @@ partition_by_time = pipe(
 # 划分信息
 # Tuple[MeetingInfo, PersoneelInfos, AttendanceInfos]
 # ->
-# Tuple[PersoneelAttendanceInfos, PersoneelAttendanceInfos, PersoneelInfos, AttendanceInfos]
+# Tuple[PersoneelAttendanceInfos, PersoneelAttendanceInfos, PersoneelInfos]
 partition_infos = pipe(
     tuple_args,
     dispatch(
@@ -461,11 +442,6 @@ partition_infos = pipe(
         pipe(
             dispatch(itemgetter(1), itemgetter(2)),
             starapply(partition_present),
-        ),
-        pipe(
-            dispatch(itemgetter(1), itemgetter(2)),
-            starapply(filter_unmatched_attendance_infos),
-            to_stream,
         ),
     ),
     chain.from_iterable,
@@ -649,8 +625,8 @@ group_infos_by_team = pipe(
 # 组织信息
 # Tuple[MeetingInfo, PersoneelInfos, AttendanceInfos]
 # ->
-# Tuple[GroupAttendanceInfos, AttendanceInfos]
-organize_infos = pipe(
+# GroupAttendanceInfos
+calc_group_attendance_infos = pipe(
     tuple_args,
     dispatch(
         pipe(
@@ -662,38 +638,34 @@ organize_infos = pipe(
     ),
     chain.from_iterable,
     tuple,
-    dispatch(
-        pipe(
-            partial(islice_, stop=4),
-            tuple,
-            dispatch(
-                itemgetter(0),
-                pipe(itemgetter(1), repeat),
-                pipe(itemgetter(2), repeat),
-                pipe(itemgetter(3), repeat),
-            ),
-            starapply(zip),
-            partial(map, filter_infos_by_group_team),
-            tuple,
-            group_infos_by_group,
-            methodcaller('items'),
-            partial(
-                map,
-                pipe(
-                    dispatch(
-                        itemgetter(0),
-                        pipe(
-                            itemgetter(1),
-                            group_infos_by_team,
-                        ),
-                    ),
-                )
-            ),
-            dict,
+    pipe(
+        partial(islice_, stop=4),
+        tuple,
+        dispatch(
+            itemgetter(0),
+            pipe(itemgetter(1), repeat),
+            pipe(itemgetter(2), repeat),
+            pipe(itemgetter(3), repeat),
         ),
-        itemgetter(4),
+        starapply(zip),
+        partial(map, filter_infos_by_group_team),
+        tuple,
+        group_infos_by_group,
+        methodcaller('items'),
+        partial(
+            map,
+            pipe(
+                dispatch(
+                    itemgetter(0),
+                    pipe(
+                        itemgetter(1),
+                        group_infos_by_team,
+                    ),
+                ),
+            )
+        ),
+        dict,
     ),
-    tuple,
 )
 
 # 小组出勤表转换为小组定位信息
@@ -1276,9 +1248,13 @@ GRAPH_MAIN = make_graph(
     ('personeel_infos', 'people_sheet', parse_people_sheet),
     ('attendance_infos', 'attendance_sheet', parse_attendance_sheet),
     (
-        ('group_attendance_infos', 'mismatched_attendance_infos'),
+        'mismatched_attendance_infos', ('personeel_infos', 'attendance_infos'),
+        filter_unmatched_attendance_infos
+    ),
+    (
+        'group_attendance_infos',
         ('meeting_info', 'personeel_infos', 'attendance_infos'),
-        organize_infos
+        calc_group_attendance_infos
     ),
     ('group_names', 'personeel_infos', get_groups_by_personeel_infos),
     (
