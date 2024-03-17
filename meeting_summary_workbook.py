@@ -21,8 +21,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font
 
 from meeting_attendance_workbook import (
-    AttendanceInfo, OVERVIEW_OF_MEMBER_ATTENDANCE,
-    get_nickname, parse_attendance_sheet
+    AttendanceInfo, DETAIL_OF_MEMBER_ATTENDANCE,
+    get_nickname, parse_attendance_detail_sheet,
 )
 from meeting_comm import (
     debug, Cell, Chain, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
@@ -1260,13 +1260,15 @@ GRAPH_MAIN = make_graph(
     ('attendance_workbook', 'attendance_workbook_filepath', load_workbook),
     ('people_sheet', 'summary_workbook', itemgetter(PEOPLE_SHEET_NAME)),
     ('meeting_info_sheet', 'summary_workbook', itemgetter(MEETING_INFO_SHEET_NAME)),
-    (
-        'attendance_sheet', 'attendance_workbook',
-        itemgetter(OVERVIEW_OF_MEMBER_ATTENDANCE)
-    ),
     ('meeting_info', 'meeting_info_sheet', parse_meeting_info_sheet),
     ('personeel_infos', 'people_sheet', parse_people_sheet),
-    ('attendance_infos', 'attendance_sheet', parse_attendance_sheet),
+    (
+        'attendance_infos', 'attendance_workbook',
+        pipe(
+            itemgetter(DETAIL_OF_MEMBER_ATTENDANCE),
+            parse_attendance_detail_sheet
+        )
+    ),
     (
         'mismatched_attendance_infos', ('personeel_infos', 'attendance_infos'),
         filter_unmatched_attendance_infos
