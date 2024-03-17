@@ -14,6 +14,7 @@ from operator import (
     add, attrgetter, contains, eq, floordiv, ge,
     itemgetter, methodcaller, mod, mul, not_, sub
 )
+from pprint import pformat
 from typing import NamedTuple, Tuple
 
 from openpyxl import load_workbook
@@ -28,7 +29,9 @@ from meeting_comm import (
     MEETING_ATTENDANCE_FILENAME, SUFFIX_NUMBER, StatError,
     constant, cross, dispatch, ensure, eval_graph, identity, if_, invoke,
     islice_, make_graph, partition, pipe, raise_, side_effect, starapply,
-    swap_args, to_stream, tuple_args, zip_refs_values
+    swap_args, to_stream, tuple_args,
+    zip_refs_values,
+    save_file
 )
 
 
@@ -960,7 +963,7 @@ generate_team_commands = pipe(
 # 根据小组定位与信息表生成小组表填充指令
 # Tuple[Tuple[TeamLocation, ...], GroupAttendanceInfo]
 # ->
-# $[FillCommand, ...]
+# Tuple[FillCommand, ...]
 generate_team_commands_by_locations_and_group_info = pipe(
     tuple_args,
     cross(identity, repeat),
@@ -969,6 +972,7 @@ generate_team_commands_by_locations_and_group_info = pipe(
     partial(map, generate_team_commands),
     # $[Tuple[Tuple[int, str, bool], ...]]
     chain.from_iterable,
+    tuple,
 )
 
 # 生成没有匹配的出席信息表填充指令
@@ -1001,11 +1005,12 @@ generate_mismatched_command = pipe(
 )
 
 # 生成没有匹配的出席信息表填充指令
-# AttendanceInfos -> $[FillCommand, ...]
+# AttendanceInfos -> Tuple[FillCommand, ...]
 generate_mismatched_commands = pipe(
     partial(enumerate, start=2),
     partial(map, generate_mismatched_command),
     chain.from_iterable,
+    tuple,
 )
 
 # 添加团队定位尾部
@@ -1068,7 +1073,7 @@ generate_clean_commands_by_lineno = dispatch(
 )
 
 # 生成表格清理指令
-# $[TeamLocation, ...] -> $[FillCommand, ...]
+# $[TeamLocation, ...] -> Tuple[FillCommand, ...]
 generate_clean_commands = pipe(
     pairwise,
     partial(
@@ -1084,6 +1089,7 @@ generate_clean_commands = pipe(
         )
     ),
     chain.from_iterable,
+    tuple,
 )
 
 # 填充单元格
@@ -1141,13 +1147,18 @@ fill_worksheet_command = pipe(
 )
 
 # 填充工作表
-# Tuple[Worksheet, $[FillCommand, ...]] -> None
+# Tuple[Worksheet, Tuple[FillCommand, ...]] -> Tuple[FillCommand, ...]
 fill_worksheet_commands = pipe(
     tuple_args,
-    cross(repeat, identity),
-    starapply(zip),
-    partial(map, fill_worksheet_command),
-    tuple,
+    side_effect(
+        pipe(
+            cross(repeat, identity),
+            starapply(zip),
+            partial(map, fill_worksheet_command),
+            tuple,
+        ),
+    ),
+    itemgetter(1),
 )
 
 # inputs:
@@ -1204,7 +1215,8 @@ fill_groups_commands = pipe(
                 ('group_name', 'group_attendance_infos', 'summary_workbook')
             ),
             partial(
-                eval_graph, GRAPH_GROUP_SHEET, 'fill_commands'
+                eval_graph, GRAPH_GROUP_SHEET,
+                ('group_name', 'fill_commands'),
             ),
         ),
     ),
@@ -1215,6 +1227,7 @@ fill_groups_commands = pipe(
 # args: Namespace
 GRAPH_MAIN = make_graph(
     ('meeting_path', 'args', attrgetter('meeting')),
+    ('debug_flag', 'args', attrgetter('debug')),
     (
         'summary_workbook_filepath', 'meeting_path',
         pipe(
@@ -1226,6 +1239,13 @@ GRAPH_MAIN = make_graph(
         'summary_workbook_output_filepath', 'meeting_path',
         pipe(
             dispatch(identity, constant(MEETING_SUMMARY_OUTPUT_FILENAME)),
+            starapply(os.path.join),
+        )
+    ),
+    (
+        'fill_output_filepath', 'meeting_path',
+        pipe(
+            dispatch(identity, constant('fill_commands.txt')),
             starapply(os.path.join),
         )
     ),
@@ -1278,6 +1298,7 @@ GRAPH_MAIN = make_graph(
         'save',
         (
             'summary_workbook', 'summary_workbook_output_filepath',
+            'debug_flag', 'fill_output_filepath',
             'fill_groups_commands', 'fill_mismatched_commands'
         ),
         pipe(
@@ -1296,6 +1317,25 @@ GRAPH_MAIN = make_graph(
                     "保存'{0}'文件成功。".format,
                     print,
                 )
+            ),
+            side_effect(
+                if_(
+                    itemgetter(2),
+                    pipe(
+                        dispatch(
+                            itemgetter(3),
+                            pipe(
+                                dispatch(
+                                    itemgetter(4), itemgetter(5),
+                                ),
+                                tuple,
+                                pformat,
+                            ),
+                        ),
+                        starapply(save_file),
+                        # TODO: 打屏“保存调试信息成功。”
+                    )
+                ),
             ),
         )
     ),

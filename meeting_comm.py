@@ -6,6 +6,7 @@ from collections import deque
 from functools import partial
 from itertools import chain, filterfalse, islice, tee
 from operator import contains, eq, itemgetter, not_
+from pathlib import Path
 from typing import (
     Any, Callable, Iterator, NamedTuple, Union, Tuple, TypeVar,
 )
@@ -52,7 +53,6 @@ class GraphRule(NamedTuple):
     action: Callable
 
 Graph = Tuple[GraphRule, ...]
-
 
 def constant(x: A) -> Callable:
     """常量。"""
@@ -256,7 +256,8 @@ def eval_graph_rule(rule: GraphRule, data: dict) -> Union[Any, Tuple[Any, ...]]:
 
 
 def zip_refs_values(refs: Union[str, Tuple[str, ...]],
-                values: Union[Any, Tuple[Any, ...]]) -> Iterator[Tuple[str, Any]]:
+                    values: Union[Any, Tuple[Any, ...]]
+                    ) -> Iterator[Tuple[str, Any]]:
     """匹配输出引用和输出。"""
     if isinstance(refs, tuple):
         assert len(refs) == len(values), f'assert length of {refs} and {values}'
@@ -274,17 +275,55 @@ def assign_outputs(outputs: Iterator[Tuple[str, Any]], data: dict):
     data.update(dict(outputs))
 
 
+class _Targets(NamedTuple):
+    """目标序列。"""
+    results: Tuple[str]
+    depends_only: Tuple[str]
+
+    @property
+    def depend_targets(self) -> Tuple[str]:
+        return tuple(
+            chain(
+                tuple(target_to_targets(self.results)),
+                self.depends_only
+            )
+        )
+
+    @property
+    def result_targets(self) -> Tuple[str]:
+        return self.results
+
+
+def create_targets(results: Union[str, Tuple[str, ...]],
+                   depends_only: Union[str, Tuple[str, ...]] = tuple()
+                   ) -> _Targets:
+    """创建目标序列。"""
+    depends_only = tuple(target_to_targets(depends_only))
+    return _Targets(results, depends_only)
+
+
 def eval_graph(graph: Graph,
                goal: Union[str, Tuple[str, ...]],
                pairs) -> Callable:
     """图求值。"""
     data = {pair[0]: pair[1] for pair in pairs}
-    goals = tuple(target_to_targets(goal))
-    execute_rules = calc_execute_rules(goals, graph, data)
+    if isinstance(goal, _Targets):
+        targets = goal
+    else:
+        targets = create_targets(goal)
+    execute_rules = calc_execute_rules(targets.depend_targets, graph, data)
     for rule in execute_rules:
         try:
             outputs = eval_graph_rule(rule, data)
         except Exception as ex:
             raise EvalGraphRuleError(rule) from ex
         assign_outputs(zip_refs_values(rule.outputs, outputs), data)
-    return eval_refs(goal, data)
+    return eval_refs(targets.result_targets, data)
+
+
+##########  ##########
+
+def save_file(filepath: Union[str, Path], content: str):
+    """保存文件。"""
+    with open(str(filepath), 'w', encoding='utf-8') as file:
+        file.write(content)
