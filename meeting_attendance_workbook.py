@@ -4,12 +4,12 @@
 import re
 from datetime import datetime, time
 from functools import partial, reduce
-from itertools import chain, groupby, repeat
-from operator import attrgetter, ge, itemgetter, methodcaller, not_
-from typing import NamedTuple, Tuple
+from itertools import chain, filterfalse, groupby, repeat
+from operator import attrgetter, contains, itemgetter, methodcaller, not_
+from typing import Iterator, NamedTuple, Tuple
 
 from meeting_comm import (
-    Cell, StatError,
+    Cell, InvalidAttendanceInfo,
     constant, cross, dispatch, identity, if_, pipe, raise_, starapply,
     swap_args, to_stream, tuple_args
 )
@@ -25,6 +25,13 @@ class AttendanceInfo(NamedTuple):
     origin_name: str
     attendance_time: time
     merged: bool = False
+
+    @property
+    def raw_name(self) -> str:
+        idx = self.origin_name.find('(')
+        if idx == -1:
+            raise InvalidAttendanceInfo(self.origin_name)
+        return self.origin_name[:idx]
 
 
 # 创建原始的出席信息
@@ -57,7 +64,7 @@ get_nickname = pipe(
     USERNAME_REGEX.match,
     if_(
         pipe(bool, not_),
-        pipe(constant(StatError(GET_NICKNAME_ERROR)), raise_),
+        pipe(constant(InvalidAttendanceInfo(GET_NICKNAME_ERROR)), raise_),
     ),
     methodcaller('group', 1),
 )
@@ -153,9 +160,14 @@ parse_attendance_detail_info = pipe(
 def merge_attendance_info(left: AttendanceInfo,
                           right: AttendanceInfo) -> AttendanceInfo:
     """合并同名的参会信息。"""
+    if len(left.nickname) < len(right.nickname):
+        final = right
+    else:
+        final = left
+
     return AttendanceInfo(
-        left.nickname,
-        left.origin_name,
+        final.nickname,
+        final.origin_name,
         add_time(left.attendance_time, right.attendance_time),
         True
     )
@@ -175,6 +187,44 @@ parse_attendance_sheet = lambda convert_func, parse_func: pipe(
             partial(reduce, merge_attendance_info),
         )
     ),
+    tuple,
+    dispatch(
+        pipe(
+            partial(filter, attrgetter('raw_name')),
+            partial(sorted, key=attrgetter('raw_name')),
+            partial(groupby, key=attrgetter('raw_name')),
+            partial(
+                map,
+                pipe(
+                    itemgetter(1),
+                    tuple,
+                    if_(
+                        pipe(
+                            partial(
+                                map,
+                                pipe(
+                                    dispatch(
+                                        attrgetter('nickname'),
+                                        attrgetter('raw_name'),
+                                    ),
+                                    starapply(contains),
+                                )
+                            ),
+                            all,
+                        ),
+                        pipe(
+                            partial(reduce, merge_attendance_info),
+                            to_stream,
+                        ),
+                    ),
+                ),
+            ),
+            chain.from_iterable,
+        ),
+        partial(filterfalse, attrgetter('raw_name')),
+    ),
+    chain.from_iterable,
+    partial(sorted, key=attrgetter('nickname')),
     tuple,
 )
 

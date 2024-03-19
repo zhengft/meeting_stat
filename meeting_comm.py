@@ -31,6 +31,10 @@ class EvalGraphRuleError(StatError):
     """规则求值错误。"""
 
 
+class InvalidAttendanceInfo(StatError):
+    """无效的参会信息。"""
+
+
 class Cell(NamedTuple):
     """单元格。"""
     value: Union[str, int, None]
