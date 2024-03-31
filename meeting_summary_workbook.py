@@ -5,6 +5,7 @@
 
 import os
 import re
+from argparse import Namespace
 from datetime import time
 from functools import partial
 from itertools import (
@@ -31,7 +32,8 @@ from meeting_comm import (
     islice_, make_graph, partition, pipe, raise_, side_effect, starapply,
     swap_args, to_stream, tuple_args,
     zip_refs_values,
-    save_file
+    save_file,
+    unique_justseen,
 )
 
 
@@ -176,11 +178,23 @@ convert_people_sheet = pipe(
 )
 
 # 解析人员总表
-# Worksheet -> PersoneelInfos
+# Worksheet -> Tuple[PersoneelInfos, Tuple[int, str]]
 parse_people_sheet = pipe(
     convert_people_sheet,
     partial(filter, pipe(itemgetter(1), attrgetter('value'), bool)),
-    partial(map, parse_personnel_info),
+    tuple,
+    dispatch(
+        pipe(
+            partial(map, parse_personnel_info),
+            tuple
+        ),
+        pipe(
+            partial(map, pipe(itemgetter(3), attrgetter('value'))),
+            unique_justseen,
+            enumerate,
+            tuple,
+        ),
+    ),
     tuple
 )
 
@@ -1261,7 +1275,9 @@ GRAPH_MAIN = make_graph(
     ('people_sheet', 'summary_workbook', itemgetter(PEOPLE_SHEET_NAME)),
     ('meeting_info_sheet', 'summary_workbook', itemgetter(MEETING_INFO_SHEET_NAME)),
     ('meeting_info', 'meeting_info_sheet', parse_meeting_info_sheet),
-    ('personeel_infos', 'people_sheet', parse_people_sheet),
+    (
+        ('personeel_infos', 'teams_order'), 'people_sheet', parse_people_sheet
+    ),
     (
         'attendance_infos', 'attendance_workbook',
         pipe(
@@ -1297,7 +1313,7 @@ GRAPH_MAIN = make_graph(
         fill_worksheet_commands
     ),
     (
-        'save',
+        'stat_time',
         (
             'summary_workbook', 'summary_workbook_output_filepath',
             'debug_flag', 'fill_output_filepath',
@@ -1345,10 +1361,15 @@ GRAPH_MAIN = make_graph(
 
 main_process = pipe(
     dispatch(
-        constant(('args',)),
-        to_stream,
+        attrgetter('subparser_name'),
+        pipe(
+            dispatch(
+                constant(('args',)),
+                to_stream,
+            ),
+            starapply(zip),
+            tuple,
+        ),
     ),
-    starapply(zip),
-    tuple,
-    partial(eval_graph, GRAPH_MAIN, 'save'),
+    starapply(partial(eval_graph, GRAPH_MAIN)),
 )

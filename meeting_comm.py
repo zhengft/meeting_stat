@@ -4,7 +4,7 @@
 import re
 from collections import deque
 from functools import partial
-from itertools import chain, filterfalse, islice, tee
+from itertools import chain, filterfalse, groupby, islice, tee
 from operator import contains, eq, itemgetter, not_
 from pathlib import Path
 from typing import (
@@ -185,6 +185,13 @@ def tuple_args(*args) -> Tuple:
     if len(args) == 1:
         return args[0]
     return tuple(args)
+
+
+def unique_justseen(iterable, key=None):
+    "List unique elements, preserving order. Remember only the element just seen."
+    # unique_justseen('AAAABBBCCDAABBB') --> A B C D A B
+    # unique_justseen('ABBcCAD', str.lower) --> A B c A D
+    return map(next, map(itemgetter(1), groupby(iterable, key)))
 
 
 ##########  ##########

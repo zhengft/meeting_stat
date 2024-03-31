@@ -4,7 +4,7 @@
 from datetime import time
 from functools import partial
 from itertools import islice
-from operator import attrgetter
+from operator import attrgetter, itemgetter
 from pprint import pprint
 
 import pytest
@@ -262,8 +262,11 @@ TEST_TEAM_ATTENDANCE_INFOS_01 = {
 TEST_TEAM_LOCATION_01 = TeamLocation('中乾', 1)
 
 
-get_test_personeel_infos_01 = partial(
-    parse_people_sheet, TEST_SUMMARY_WB_01[PEOPLE_SHEET_NAME]
+get_test_personeel_infos_01 = pipe(
+    partial(
+        parse_people_sheet, TEST_SUMMARY_WB_01[PEOPLE_SHEET_NAME]
+    ),
+    itemgetter(0),
 )
 
 
@@ -291,12 +294,15 @@ def test_contains_formal_name_03():
 def test_parse_people_sheet_01():
     result = parse_people_sheet(TEST_SUMMARY_WB_01[PEOPLE_SHEET_NAME])
     expected = (
-        TEST_PERSONEEL_INFO_01,
-        TEST_PERSONEEL_INFO_02,
-        TEST_PERSONEEL_INFO_03,
-        TEST_PERSONEEL_INFO_04,
-        TEST_PERSONEEL_INFO_05,
-        TEST_PERSONEEL_INFO_07,
+        (
+            TEST_PERSONEEL_INFO_01,
+            TEST_PERSONEEL_INFO_02,
+            TEST_PERSONEEL_INFO_03,
+            TEST_PERSONEEL_INFO_04,
+            TEST_PERSONEEL_INFO_05,
+            TEST_PERSONEEL_INFO_07,
+        ),
+        ((0, '中乾'), (1, '中坤'), (2, '上乾')),
     )
     assert expected == result
 
