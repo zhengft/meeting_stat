@@ -302,7 +302,7 @@ def test_parse_people_sheet_01():
             TEST_PERSONEEL_INFO_05,
             TEST_PERSONEEL_INFO_07,
         ),
-        ((0, '中乾'), (1, '中坤'), (2, '上乾')),
+        ((0, '中乾'), (1, '中坤'), (2, '上乾'), (3, '中乾')),
     )
     assert expected == result
 

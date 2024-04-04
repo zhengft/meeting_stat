@@ -23,8 +23,20 @@ class StatError(Exception):
     """统计异常。"""
 
 
+class UnknownFormalName(StatError):
+    """未知正式名称。"""
+
+
+class PipeError(StatError):
+    """管道错误。"""
+
+
 class MissingTarget(StatError):
     """缺失目标。"""
+
+
+class DuplicateTarget(StatError):
+    """重复目标。"""
 
 
 class EvalGraphRuleError(StatError):
@@ -43,20 +55,6 @@ class Cell(NamedTuple):
 A = TypeVar('A')
 B = TypeVar('B')
 
-
-class Chain(tuple):
-    """顺序调用链。"""
-
-
-Targets = Union[str, Tuple[str, ...], Chain]
-
-
-class GraphRule(NamedTuple):
-    outputs: Targets
-    inputs: Targets
-    action: Callable
-
-Graph = Tuple[GraphRule, ...]
 
 def constant(x: A) -> Callable:
     """常量。"""
@@ -120,7 +118,16 @@ def islice_(iterable, start = None, stop = None, step = None):
 
 def make_graph(*args: Tuple[str, str, Callable]):
     """创建图。"""
-    return tuple(GraphRule(*arg) for arg in args)
+    graph = tuple(GraphRule(*arg) for arg in args)
+
+    targets = set()
+    for rule in graph:
+        for output in target_to_targets(rule.outputs):
+            if output in targets:
+                raise DuplicateTarget(output)
+            else:
+                targets.add(output)
+    return graph
 
 
 def partition(pred, iterable):
@@ -133,13 +140,17 @@ def partition(pred, iterable):
     return filter(pred, t1), filterfalse(pred, t2)
 
 
-def pipe(*funcs):
+def pipe(*funcs, name: str = ''):
     """函数管道。"""
     def pipe_func(*args, **kwargs):
-        result = funcs[0](*args, **kwargs)
-        for func in funcs[1:]:
+        idx = 0
+        # try:
+        result = funcs[idx](*args, **kwargs)
+        for idx, func in enumerate(funcs[1:], start=1):
             result = func(result)
         return result
+        # except Exception as ex:
+        #     raise PipeError(name if name else funcs, idx) from ex
     return pipe_func
 
 
@@ -196,14 +207,29 @@ def unique_justseen(iterable, key=None):
 
 ##########  ##########
 
-# 目标转换为目标序列
-target_to_targets = pipe(
-    if_(
-        partial(swap_args(isinstance), tuple),
-        iter,
-        to_stream,
-    )
-)
+
+class Chain(tuple):
+    """顺序调用链。"""
+
+
+Targets = Union[str, Tuple[str, ...], Chain]
+
+
+class GraphRule(NamedTuple):
+    outputs: Targets
+    inputs: Targets
+    action: Callable
+
+Graph = Tuple[GraphRule, ...]
+
+
+def target_to_targets(target: Targets) -> Iterator[str]:
+    """目标转换为目标序列。"""
+    if isinstance(target, tuple):
+        for sub in target:
+            yield from target_to_targets(sub)
+    else:
+        yield target
 
 
 # 目标是否匹配规则
@@ -287,12 +313,13 @@ def assign_outputs(outputs: Iterator[Tuple[str, Any]], data: dict):
 
 
 class _Targets(NamedTuple):
-    """目标序列。"""
+    """目标序列。支持depends_only。"""
     results: Tuple[str]
     depends_only: Tuple[str]
 
     @property
     def depend_targets(self) -> Tuple[str]:
+        """依赖的目标列表。"""
         return tuple(
             chain(
                 tuple(target_to_targets(self.results)),

@@ -5,7 +5,6 @@
 
 import os
 import re
-from argparse import Namespace
 from datetime import time
 from functools import partial
 from itertools import (
@@ -16,7 +15,7 @@ from operator import (
     itemgetter, methodcaller, mod, mul, not_, sub
 )
 from pprint import pformat
-from typing import NamedTuple, Tuple
+from typing import Dict, Iterator, NamedTuple, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.styles import Font
@@ -27,7 +26,7 @@ from meeting_attendance_workbook import (
 )
 from meeting_comm import (
     debug, Cell, Chain, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
-    MEETING_ATTENDANCE_FILENAME, SUFFIX_NUMBER, StatError,
+    MEETING_ATTENDANCE_FILENAME, SUFFIX_NUMBER, StatError, UnknownFormalName,
     constant, cross, dispatch, ensure, eval_graph, identity, if_, invoke,
     islice_, make_graph, partition, pipe, raise_, side_effect, starapply,
     swap_args, to_stream, tuple_args,
@@ -40,6 +39,7 @@ from meeting_comm import (
 PEOPLE_SHEET_NAME = '人员总表'
 MEETING_INFO_SHEET_NAME = '参数'
 MISMATCHED_SHEET_NAME = '未改名'
+TOTAL_ABSENT_SHEET_NAME = '缺勤总表'
 
 TEAM_NAME_REGEX = re.compile(r'(..)组')
 
@@ -181,10 +181,9 @@ convert_people_sheet = pipe(
 # Worksheet -> Tuple[PersoneelInfos, Tuple[int, str]]
 parse_people_sheet = pipe(
     convert_people_sheet,
-    partial(filter, pipe(itemgetter(1), attrgetter('value'), bool)),
-    tuple,
     dispatch(
         pipe(
+            partial(filter, pipe(itemgetter(1), attrgetter('value'), bool)),
             partial(map, parse_personnel_info),
             tuple
         ),
@@ -195,6 +194,48 @@ parse_people_sheet = pipe(
             tuple,
         ),
     ),
+    tuple
+)
+
+# 转换缺勤总表为内部数据结构
+# Worksheet -> Tuple[Tuple[Cell, ...], ...]
+convert_total_absent_sheet = pipe(
+    methodcaller('iter_rows', min_row=2, max_col=7, values_only=True),
+    partial(map, pipe(partial(map, Cell), tuple)),
+    tuple,
+)
+
+
+AbsentInfo = Tuple[str, Tuple[str, ...]]
+
+# 解析缺勤信息
+# Tuple[Cell, ...] -> PersoneelInfo
+parse_absent_info = pipe(
+    partial(islice_, start=1),
+    partial(map, attrgetter('value')),
+    tuple,
+    dispatch(
+        pipe(
+            itemgetter(0),
+            methodcaller('strip'),
+        ),
+        pipe(
+            partial(islice_, start=1),
+            partial(filter, bool),
+            partial(map, methodcaller('strip')),
+            partial(filter, bool),
+            tuple,
+        ),
+    ),
+    tuple,
+)
+
+# 解析缺勤总表
+# Worksheet -> Tuple[Tuple[str, Tuple[str, ...]], ...]
+parse_total_absent_sheet = pipe(
+    convert_total_absent_sheet,
+    partial(filter, pipe(itemgetter(0), attrgetter('value'), bool)),
+    partial(map, parse_absent_info),
     tuple
 )
 
@@ -274,7 +315,6 @@ convert_group_attendance_sheet = pipe(
 
 # 出席信息中是否包含人员正式名称
 # Tuple[PersoneelInfo, AttendanceInfo] -> bool
-# PersoneelInfo, AttendanceInfo -> bool
 contains_formal_name = pipe(
     tuple_args,
     dispatch(
@@ -502,6 +542,21 @@ get_groups_by_personeel_infos = pipe(
     tuple,
 )
 
+
+def get_personeel_info_by_formal_name(personeel_infos: PersoneelInfos,
+                                      formal_name: str) -> PersoneelInfo:
+    """根据正式名称获取个人信息。"""
+    try:
+        return next(
+            filter(
+                pipe(attrgetter('formal_name'), partial(eq, formal_name)),
+                personeel_infos
+            )
+        )
+    except StopIteration:
+        raise UnknownFormalName(formal_name)
+
+
 # str -> Callable[[PersoneelAttendanceInfo], bool]
 # x -> pipe(
 #     itemgetter(0), attrgetter('team'),
@@ -706,6 +761,26 @@ group_attendance_sheet_to_team_locations = pipe(
                 itemgetter(0),
             ),
             starapply(TeamLocation),
+        ),
+    ),
+    tuple,
+)
+
+# 小组出勤表转换为缺勤信息
+# Worksheet -> Tuple[str, ...]
+group_attendance_sheet_to_absents = pipe(
+    convert_group_attendance_sheet,
+    partial(
+        map, pipe(itemgetter(0), attrgetter('value')),
+    ),
+    partial(
+        filter, pipe(
+            dispatch(
+                bool,
+                pipe(TEAM_NAME_REGEX.match, bool, not_),
+                pipe(partial(eq, '全勤'), not_),
+            ),
+            all,
         ),
     ),
     tuple,
@@ -1047,44 +1122,12 @@ add_team_locations_tail = pipe(
     chain.from_iterable,
 )
 
-generate_clean_commands_by_lineno = dispatch(
-    pipe(
-        dispatch(
-            identity,
-            constant(1),
-            constant(''),
-            constant(False),
-        ),
-        create_fill_command,
-    ),
-    pipe(
-        dispatch(
-            identity,
-            constant(2),
-            constant(''),
-            constant(False),
-        ),
-        create_fill_command,
-    ),
-    pipe(
-        dispatch(
-            identity,
-            constant(3),
-            constant(''),
-            constant(False),
-        ),
-        create_fill_command,
-    ),
-    pipe(
-        dispatch(
-            identity,
-            constant(4),
-            constant(''),
-            constant(False),
-        ),
-        create_fill_command,
-    ),
-)
+
+def generate_clean_commands_by_lineno(lineno: int, maxcol: int
+                                      ) -> Iterator[FillCommand]:
+    for col in range(1, maxcol+1):
+        yield create_fill_command((lineno, col, '', False))
+
 
 # 生成表格清理指令
 # $[TeamLocation, ...] -> Tuple[FillCommand, ...]
@@ -1098,7 +1141,7 @@ generate_clean_commands = pipe(
                 itemgetter(1),
             ),
             starapply(range),
-            partial(map, generate_clean_commands_by_lineno),
+            partial(map, partial(generate_clean_commands_by_lineno, maxcol=4)),
             chain.from_iterable,
         )
     ),
@@ -1237,6 +1280,50 @@ fill_groups_commands = pipe(
     tuple,
 )
 
+
+def sort_absent_infos(absent_infos: Tuple[AbsentInfo, ...],
+                      teams_no: Dict[str, int]) -> Tuple[AbsentInfo, ...]:
+    """排序缺席信息。"""
+    return tuple(
+        sorted(
+            absent_infos, key=pipe(
+                itemgetter(0),
+                dispatch(
+                    pipe(partial(islice_, stop=2), ''.join, teams_no.__getitem__),
+                    pipe(
+                        partial(re.search, r'\d+'),
+                        methodcaller('group', 0),
+                        int,
+                    ),
+                ),
+                tuple,
+            )
+        )
+    )
+
+
+# 生成缺勤表清理指令
+# $[Worksheet, ...] -> Tuple[FillCommand, ...]
+generate_total_absent_clean_commands = pipe(
+    attrgetter('max_row'),
+    partial(add, 1),
+    partial(range, 2),
+    partial(map, partial(generate_clean_commands_by_lineno, maxcol=7)),
+    chain.from_iterable,
+    tuple,
+)
+
+
+def generate_absent_info_fill_command_by_lineno(absent_info: AbsentInfo,
+                                                lineno: int
+                                                ) -> Iterator[FillCommand]:
+    """生成缺席信息填充指令。"""
+    yield create_fill_command((lineno, 1, absent_info[0][:2], False))
+    yield create_fill_command((lineno, 2, absent_info[0], False))
+    for col, solar_term in enumerate(absent_info[1], start=3):
+        yield create_fill_command((lineno, col, solar_term, False))
+
+
 # inputs:
 # args: Namespace
 GRAPH_MAIN = make_graph(
@@ -1257,9 +1344,16 @@ GRAPH_MAIN = make_graph(
         )
     ),
     (
-        'fill_output_filepath', 'meeting_path',
+        'fill_time_output_filepath', 'meeting_path',
         pipe(
-            dispatch(identity, constant('fill_commands.txt')),
+            dispatch(identity, constant('fill_time_commands.txt')),
+            starapply(os.path.join),
+        )
+    ),
+    (
+        'fill_absent_output_filepath', 'meeting_path',
+        pipe(
+            dispatch(identity, constant('fill_absent_commands.txt')),
             starapply(os.path.join),
         )
     ),
@@ -1273,10 +1367,28 @@ GRAPH_MAIN = make_graph(
     ('summary_workbook', 'summary_workbook_filepath', load_workbook),
     ('attendance_workbook', 'attendance_workbook_filepath', load_workbook),
     ('people_sheet', 'summary_workbook', itemgetter(PEOPLE_SHEET_NAME)),
+    (
+        'total_absent_sheet', 'summary_workbook',
+        itemgetter(TOTAL_ABSENT_SHEET_NAME),
+    ),
     ('meeting_info_sheet', 'summary_workbook', itemgetter(MEETING_INFO_SHEET_NAME)),
     ('meeting_info', 'meeting_info_sheet', parse_meeting_info_sheet),
+    ('solar_term', 'meeting_info', attrgetter('solar_term')),
     (
         ('personeel_infos', 'teams_order'), 'people_sheet', parse_people_sheet
+    ),
+    (
+        'teams_no', 'teams_order',
+        pipe(
+            partial(
+                map,
+                pipe(
+                    dispatch(itemgetter(1), itemgetter(0)),
+                    tuple,
+                ),
+            ),
+            dict,
+        ),
     ),
     (
         'attendance_infos', 'attendance_workbook',
@@ -1316,7 +1428,7 @@ GRAPH_MAIN = make_graph(
         'stat_time',
         (
             'summary_workbook', 'summary_workbook_output_filepath',
-            'debug_flag', 'fill_output_filepath',
+            'debug_flag', 'fill_time_output_filepath',
             'fill_groups_commands', 'fill_mismatched_commands'
         ),
         pipe(
@@ -1352,6 +1464,163 @@ GRAPH_MAIN = make_graph(
                         ),
                         starapply(save_file),
                         # TODO: 打屏“保存调试信息成功。”
+                    )
+                ),
+            ),
+        )
+    ),
+    # stat_absent
+    (
+        'group_attendance_sheets', ('group_names', 'summary_workbook'),
+        pipe(
+            cross(identity, repeat),
+            starapply(zip),
+            partial(map, item_extract),
+            tuple,
+        ),
+    ),
+    (
+        'absent_names', 'group_attendance_sheets',
+        pipe(
+            partial(map, group_attendance_sheet_to_absents),
+            chain.from_iterable,
+            tuple,
+        ),
+    ),
+    (
+        'absent_personeel_infos', ('personeel_infos', 'absent_names'),
+        pipe(
+            cross(repeat, identity),
+            starapply(zip),
+            partial(starmap, get_personeel_info_by_formal_name),
+            tuple,
+        ),
+    ),
+    (
+        'absent_infos', 'total_absent_sheet', parse_total_absent_sheet,
+    ),
+    (
+        'added_absent_infos', ('absent_personeel_infos', 'solar_term'),
+        pipe(
+            cross(identity, repeat),
+            starapply(zip),
+            partial(
+                map,
+                pipe(
+                    dispatch(
+                        pipe(itemgetter(0), attrgetter('formal_name')),
+                        pipe(itemgetter(1), to_stream, tuple),
+                    ),
+                    tuple,
+                ),
+            ),
+            tuple,
+        ),
+    ),
+    (
+        'merged_absent_infos', ('absent_infos', 'added_absent_infos'),
+        pipe(
+            chain.from_iterable,
+            partial(sorted, key=itemgetter(0)),
+            partial(groupby, key=itemgetter(0)),
+            partial(
+                map,
+                pipe(
+                    cross(
+                        identity,
+                        pipe(
+                            partial(map, itemgetter(1),),
+                            chain.from_iterable,
+                            tuple,
+                        ),
+                    ),
+                    tuple,
+                ),
+            ),
+            tuple,
+        ),
+    ),
+    (
+        'sorted_merged_absent_infos', ('merged_absent_infos', 'teams_no'),
+        starapply(sort_absent_infos),
+    ),
+    (
+        'total_absent_clean_commands', 'total_absent_sheet',
+        generate_total_absent_clean_commands,
+    ),
+    (
+        'total_absent_fill_commands', 'sorted_merged_absent_infos',
+        pipe(
+            partial(enumerate, start=2),
+            partial(
+                map,
+                pipe(
+                    dispatch(
+                        itemgetter(1), itemgetter(0),
+                    ),
+                    starapply(generate_absent_info_fill_command_by_lineno),
+                ),
+            ),
+            chain.from_iterable,
+            tuple,
+        ),
+    ),
+    (
+        'total_absent_commands',
+        ('total_absent_clean_commands', 'total_absent_fill_commands'),
+        chain.from_iterable,
+    ),
+    (
+        'fill_total_absent_commands',
+        ('total_absent_sheet', 'total_absent_commands'),
+        fill_worksheet_commands
+    ),
+    (
+        'stat_absent',
+        (
+            'summary_workbook', 'summary_workbook_output_filepath',
+            'debug_flag', 'fill_total_absent_commands', 'fill_absent_output_filepath'
+        ),
+        pipe(
+            side_effect(
+                pipe(
+                    dispatch(
+                        pipe(itemgetter(0), attrgetter('save')),
+                        itemgetter(1),
+                    ),
+                    starapply(invoke),
+                )
+            ),
+            side_effect(
+                pipe(
+                    itemgetter(1),
+                    "保存'{0}'文件成功。".format,
+                    print,
+                )
+            ),
+            side_effect(
+                if_(
+                    itemgetter(2),
+                    pipe(
+                        side_effect(
+                            pipe(
+                                dispatch(
+                                    itemgetter(4),
+                                    pipe(
+                                        itemgetter(3),
+                                        pformat,
+                                    ),
+                                ),
+                                starapply(save_file),
+                            ),
+                        ),
+                        side_effect(
+                            pipe(
+                                itemgetter(4),
+                                "保存'{0}'文件成功。".format,
+                                print,
+                            )
+                        ),
                     )
                 ),
             ),

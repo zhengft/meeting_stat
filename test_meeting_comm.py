@@ -7,10 +7,10 @@ from operator import add, itemgetter
 import pytest
 
 from meeting_comm import (
-    GraphRule, MissingTarget, assign_outputs, calc_execute_rules,
-    dispatch, eval_graph, eval_graph_rule, eval_refs,
-    identity, make_graph, pipe, starapply, target_matched, tuple_args,
-    zip_refs_values
+    DuplicateTarget, GraphRule, MissingTarget, assign_outputs,
+    calc_execute_rules, dispatch, eval_graph, eval_graph_rule, eval_refs,
+    identity, make_graph, pipe, starapply, target_matched, target_to_targets,
+    tuple_args, zip_refs_values,
 )
 
 
@@ -61,6 +61,24 @@ def test_make_graph_01():
     assert result is not None
 
 
+def test_make_graph_02():
+    with pytest.raises(DuplicateTarget) as ex:
+        make_graph(
+            ('aaa', 'bbb', identity),
+            ('aaa', 'ccc', identity),
+        )
+    assert 'aaa' == str(ex.value)
+
+
+def test_make_graph_03():
+    with pytest.raises(DuplicateTarget) as ex:
+        make_graph(
+            (('aaa', 'bbb'), ('x', 'y'), identity),
+            (('bbb', 'ccc'), ('x', 'y'), identity),
+        )
+    assert 'bbb' == str(ex.value)
+
+
 def test_target_matched_01():
     result = target_matched('aaa', 'aaa')
     assert result is True
@@ -79,6 +97,24 @@ def test_target_matched_03():
 def test_target_matched_04():
     result = target_matched('aaa', ('ccc', 'bbb'))
     assert result is False
+
+
+def test_target_to_targets_01():
+    result = tuple(target_to_targets('aaa'))
+    expected = ('aaa',)
+    assert expected == result
+
+
+def test_target_to_targets_02():
+    result = tuple(target_to_targets(('aaa', 'bbb')))
+    expected = ('aaa', 'bbb')
+    assert expected == result
+
+
+def test_target_to_targets_03():
+    result = tuple(target_to_targets(('aaa', ('bbb', 'ccc'))))
+    expected = ('aaa', 'bbb', 'ccc')
+    assert expected == result
 
 
 def test_calc_execute_rules_01():
