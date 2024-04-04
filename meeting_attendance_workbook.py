@@ -188,6 +188,44 @@ parse_attendance_sheet = lambda convert_func, parse_func: pipe(
         )
     ),
     tuple,
+    dispatch(
+        pipe(
+            partial(filter, attrgetter('raw_name')),
+            partial(sorted, key=attrgetter('raw_name')),
+            partial(groupby, key=attrgetter('raw_name')),
+            partial(
+                map,
+                pipe(
+                    itemgetter(1),
+                    tuple,
+                    if_(
+                        pipe(
+                            partial(
+                                map,
+                                pipe(
+                                    dispatch(
+                                        attrgetter('nickname'),
+                                        attrgetter('raw_name'),
+                                    ),
+                                    starapply(contains),
+                                )
+                            ),
+                            all,
+                        ),
+                        pipe(
+                            partial(reduce, merge_attendance_info),
+                            to_stream,
+                        ),
+                    ),
+                ),
+            ),
+            chain.from_iterable,
+        ),
+        partial(filterfalse, attrgetter('raw_name')),
+    ),
+    chain.from_iterable,
+    partial(sorted, key=attrgetter('nickname')),
+    tuple,
 )
 
 
