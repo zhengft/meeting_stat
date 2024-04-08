@@ -12,13 +12,13 @@ from itertools import (
 )
 from operator import (
     add, attrgetter, contains, eq, floordiv, ge,
-    itemgetter, methodcaller, mod, mul, not_, sub
+    itemgetter, lt, methodcaller, mod, mul, not_, sub
 )
 from pprint import pformat
 from typing import Dict, Iterator, NamedTuple, Tuple
 
 from openpyxl import load_workbook
-from openpyxl.styles import Font
+from openpyxl.styles import Alignment, Border, Font, Side
 
 from meeting_attendance_workbook import (
     AttendanceInfo, DETAIL_OF_MEMBER_ATTENDANCE,
@@ -45,6 +45,12 @@ TEAM_NAME_REGEX = re.compile(r'(..)组')
 
 BLACK_FONT = Font(color='00000000')
 RED_FONT = Font(color='00FF0000')
+CENTER_ALIGN = Alignment(horizontal='center', vertical='center')
+BORDER_SIDE = Side(border_style='thin', color='00000000')
+BORDER = Border(
+    left=BORDER_SIDE, right=BORDER_SIDE,
+    top=BORDER_SIDE, bottom=BORDER_SIDE,
+)
 
 
 class PersoneelInfo(NamedTuple):
@@ -86,7 +92,14 @@ class MeetingInfo(NamedTuple):
     meeting_time: time
 
 
-FillCommand = Tuple[int, int, str, bool]
+class FillCommand(NamedTuple):
+    """填充指令。"""
+    line_no: int
+    column_no: int
+    text: str
+    is_red: bool
+    is_absent: bool = False
+
 
 create_fill_command = tuple
 
@@ -236,7 +249,7 @@ parse_total_absent_sheet = pipe(
     convert_total_absent_sheet,
     partial(filter, pipe(itemgetter(0), attrgetter('value'), bool)),
     partial(map, parse_absent_info),
-    tuple
+    tuple,
 )
 
 # 转换会议信息为内部数据结构
@@ -1123,10 +1136,12 @@ add_team_locations_tail = pipe(
 )
 
 
-def generate_clean_commands_by_lineno(lineno: int, maxcol: int
+def generate_clean_commands_by_lineno(lineno: int,
+                                      maxcol: int,
+                                      is_absent: bool = False,
                                       ) -> Iterator[FillCommand]:
     for col in range(1, maxcol+1):
-        yield create_fill_command((lineno, col, '', False))
+        yield create_fill_command((lineno, col, '', False, is_absent))
 
 
 # 生成表格清理指令
@@ -1141,7 +1156,8 @@ generate_clean_commands = pipe(
                 itemgetter(1),
             ),
             starapply(range),
-            partial(map, partial(generate_clean_commands_by_lineno, maxcol=4)),
+            partial(
+                map, partial(generate_clean_commands_by_lineno, maxcol=4)),
             chain.from_iterable,
         )
     ),
@@ -1163,24 +1179,59 @@ fill_workcell = pipe(
             starapply(setattr),
         ),
     ),
-    if_(
-        pipe(itemgetter(1), itemgetter(3)),
-        pipe(
-            dispatch(
-                itemgetter(0),
-                constant('font'),
-                constant(RED_FONT),
+    side_effect(
+        if_(
+            pipe(itemgetter(1), itemgetter(3)),
+            pipe(
+                dispatch(
+                    itemgetter(0),
+                    constant('font'),
+                    constant(RED_FONT),
+                ),
+                starapply(setattr),
             ),
-            starapply(setattr),
+            pipe(
+                dispatch(
+                    itemgetter(0),
+                    constant('font'),
+                    constant(BLACK_FONT),
+                ),
+                starapply(setattr),
+            )
         ),
-        pipe(
-            dispatch(
-                itemgetter(0),
-                constant('font'),
-                constant(BLACK_FONT),
+    ),
+    side_effect(
+        if_(
+            pipe(
+                dispatch(
+                    pipe(itemgetter(1), len, partial(lt, 4)),
+                    pipe(itemgetter(1), itemgetter(4)),
+                ),
+                all,
             ),
-            starapply(setattr),
-        )
+            pipe(
+                side_effect(
+                    pipe(
+                        dispatch(
+                            itemgetter(0),
+                            constant('alignment'),
+                            constant(CENTER_ALIGN),
+                        ),
+                        starapply(setattr),
+                    )
+                ),
+                side_effect(
+                    pipe(
+                        dispatch(
+                            itemgetter(0),
+                            constant('border'),
+                            constant(BORDER),
+                        ),
+                        starapply(setattr),
+                    )
+                ),
+            ),
+        ),
     ),
 )
 
@@ -1318,10 +1369,10 @@ def generate_absent_info_fill_command_by_lineno(absent_info: AbsentInfo,
                                                 lineno: int
                                                 ) -> Iterator[FillCommand]:
     """生成缺席信息填充指令。"""
-    yield create_fill_command((lineno, 1, absent_info[0][:2], False))
-    yield create_fill_command((lineno, 2, absent_info[0], False))
+    yield create_fill_command((lineno, 1, absent_info[0][:2], False, True))
+    yield create_fill_command((lineno, 2, absent_info[0], False, True))
     for col, solar_term in enumerate(absent_info[1], start=3):
-        yield create_fill_command((lineno, col, solar_term, False))
+        yield create_fill_command((lineno, col, solar_term, False, True))
 
 
 # inputs:
@@ -1531,6 +1582,7 @@ GRAPH_MAIN = make_graph(
                         pipe(
                             partial(map, itemgetter(1),),
                             chain.from_iterable,
+                            unique_justseen,
                             tuple,
                         ),
                     ),
