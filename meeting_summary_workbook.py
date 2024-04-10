@@ -41,6 +41,8 @@ MEETING_INFO_SHEET_NAME = '参数'
 MISMATCHED_SHEET_NAME = '未改名'
 TOTAL_ABSENT_SHEET_NAME = '缺勤总表'
 
+TOTAL_ABSENT_SHEET_FIRST_LINE = 3
+
 TEAM_NAME_REGEX = re.compile(r'(..)组')
 
 BLACK_FONT = Font(color='00000000')
@@ -213,7 +215,10 @@ parse_people_sheet = pipe(
 # 转换缺勤总表为内部数据结构
 # Worksheet -> Tuple[Tuple[Cell, ...], ...]
 convert_total_absent_sheet = pipe(
-    methodcaller('iter_rows', min_row=2, max_col=7, values_only=True),
+    methodcaller(
+        'iter_rows', min_row=TOTAL_ABSENT_SHEET_FIRST_LINE,
+        max_col=7, values_only=True
+    ),
     partial(map, pipe(partial(map, Cell), tuple)),
     tuple,
 )
@@ -1603,7 +1608,7 @@ GRAPH_MAIN = make_graph(
     (
         'total_absent_fill_commands', 'sorted_merged_absent_infos',
         pipe(
-            partial(enumerate, start=2),
+            partial(enumerate, start=TOTAL_ABSENT_SHEET_FIRST_LINE),
             partial(
                 map,
                 pipe(
