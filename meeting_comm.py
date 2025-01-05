@@ -144,13 +144,13 @@ def pipe(*funcs, name: str = ''):
     """函数管道。"""
     def pipe_func(*args, **kwargs):
         idx = 0
-        # try:
-        result = funcs[idx](*args, **kwargs)
-        for idx, func in enumerate(funcs[1:], start=1):
-            result = func(result)
-        return result
-        # except Exception as ex:
-        #     raise PipeError(name if name else funcs, idx) from ex
+        try:
+            result = funcs[idx](*args, **kwargs)
+            for idx, func in enumerate(funcs[1:], start=1):
+                result = func(result)
+            return result
+        except Exception as ex:
+            raise PipeError(name if name else funcs, idx) from ex
     return pipe_func
 
 

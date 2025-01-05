@@ -405,7 +405,7 @@ match_attendance_info = pipe(
     ),
     starapply(filter),
     tuple,
-    partial(ensure, pipe(len, partial(eq, 1))),
+    partial(ensure, pipe(side_effect(print), len, partial(eq, 1))),
     itemgetter(0),
 )
 
@@ -1261,7 +1261,7 @@ fill_worksheet_command = pipe(
 
 # 填充工作表
 # Tuple[Worksheet, Tuple[FillCommand, ...]] -> Tuple[FillCommand, ...]
-fill_worksheet_commands = pipe(
+do_fill_worksheet_commands = pipe(
     tuple_args,
     side_effect(
         pipe(
@@ -1303,11 +1303,11 @@ GRAPH_GROUP_SHEET = make_graph(
     ),
     (
         'fill_clean_commands', ('group_attendance_sheet', 'clean_commands'),
-        fill_worksheet_commands
+        do_fill_worksheet_commands
     ),
     (
         'fill_team_commands', ('group_attendance_sheet', 'team_commands'),
-        fill_worksheet_commands
+        do_fill_worksheet_commands
     ),
     (
         'fill_commands', Chain(('fill_clean_commands', 'fill_team_commands')),
@@ -1316,7 +1316,7 @@ GRAPH_GROUP_SHEET = make_graph(
 )
 
 # 填充各大组命令
-fill_groups_commands = pipe(
+do_fill_groups_commands = pipe(
     tuple_args,
     cross(identity, repeat, repeat),
     starapply(zip),
@@ -1380,6 +1380,62 @@ def generate_absent_info_fill_command_by_lineno(absent_info: AbsentInfo,
         yield create_fill_command((lineno, col, solar_term, False, True))
 
 
+# 小组序列转换为小组字典
+convert_teams_order_to_teams_no = pipe(
+    partial(
+        map,
+        pipe(
+            dispatch(itemgetter(1), itemgetter(0)),
+            tuple,
+        ),
+    ),
+    dict,
+)
+
+def stat_time(args):
+    """统计参会时长。"""
+    summary_workbook = load_workbook(
+        os.path.join(args.meeting, MEETING_SUMMARY_FILENAME)
+    )
+    attendance_workbook = load_workbook(
+        os.path.join(args.meeting, MEETING_ATTENDANCE_FILENAME)
+    )
+    summary_workbook_output_filepath = os.path.join(
+        args.meeting, MEETING_SUMMARY_OUTPUT_FILENAME
+    )
+    fill_time_output_filepath = os.path.join(args.meeting, 'fill_time_commands.txt')
+    people_sheet = summary_workbook[PEOPLE_SHEET_NAME]
+    personeel_infos, teams_order = parse_people_sheet(people_sheet)
+    teams_no = convert_teams_order_to_teams_no(teams_order)
+    attendance_infos = parse_attendance_detail_sheet(
+        attendance_workbook[DETAIL_OF_MEMBER_ATTENDANCE]
+    )
+    mismatched_attendance_infos = filter_unmatched_attendance_infos(
+        personeel_infos, attendance_infos
+    )
+    mismatched_commands = generate_mismatched_commands(mismatched_attendance_infos)
+    mismatched_sheet = summary_workbook[MISMATCHED_SHEET_NAME]
+
+    meeting_info_sheet = summary_workbook[MEETING_INFO_SHEET_NAME]
+    meeting_info = parse_meeting_info_sheet(meeting_info_sheet)
+
+    group_names = get_groups_by_personeel_infos(personeel_infos)
+    group_attendance_infos = calc_group_attendance_infos(
+        meeting_info, personeel_infos, attendance_infos
+    )
+
+    fill_mismatched_commands = do_fill_worksheet_commands(mismatched_sheet, mismatched_commands)
+    fill_groups_commands = do_fill_groups_commands(
+        group_names, group_attendance_infos, summary_workbook
+    )
+    summary_workbook.save(summary_workbook_output_filepath)
+    print(f"保存'{summary_workbook_output_filepath}'文件成功。")
+    if args.debug:
+        save_file(
+            fill_time_output_filepath, pformat((fill_groups_commands, fill_mismatched_commands))
+        )
+        print("保存调试信息成功。")
+
 # inputs:
 # args: Namespace
 GRAPH_MAIN = make_graph(
@@ -1435,16 +1491,7 @@ GRAPH_MAIN = make_graph(
     ),
     (
         'teams_no', 'teams_order',
-        pipe(
-            partial(
-                map,
-                pipe(
-                    dispatch(itemgetter(1), itemgetter(0)),
-                    tuple,
-                ),
-            ),
-            dict,
-        ),
+        convert_teams_order_to_teams_no,
     ),
     (
         'attendance_infos', 'attendance_workbook',
@@ -1454,76 +1501,14 @@ GRAPH_MAIN = make_graph(
         )
     ),
     (
-        'mismatched_attendance_infos', ('personeel_infos', 'attendance_infos'),
-        filter_unmatched_attendance_infos
-    ),
-    (
         'group_attendance_infos',
         ('meeting_info', 'personeel_infos', 'attendance_infos'),
         calc_group_attendance_infos
     ),
     ('group_names', 'personeel_infos', get_groups_by_personeel_infos),
+    # stat_time
     (
-        'fill_groups_commands',
-        ('group_names', 'group_attendance_infos', 'summary_workbook'),
-        fill_groups_commands
-    ),
-    (
-        'mismatched_commands', 'mismatched_attendance_infos',
-        generate_mismatched_commands
-    ),
-    (
-        'mismatched_sheet', 'summary_workbook',
-        partial(item_extract, MISMATCHED_SHEET_NAME)
-    ),
-    (
-        'fill_mismatched_commands', ('mismatched_sheet', 'mismatched_commands'),
-        fill_worksheet_commands
-    ),
-    (
-        'stat_time',
-        (
-            'summary_workbook', 'summary_workbook_output_filepath',
-            'debug_flag', 'fill_time_output_filepath',
-            'fill_groups_commands', 'fill_mismatched_commands'
-        ),
-        pipe(
-            side_effect(
-                pipe(
-                    dispatch(
-                        pipe(itemgetter(0), attrgetter('save')),
-                        itemgetter(1),
-                    ),
-                    starapply(invoke),
-                )
-            ),
-            side_effect(
-                pipe(
-                    itemgetter(1),
-                    "保存'{0}'文件成功。".format,
-                    print,
-                )
-            ),
-            side_effect(
-                if_(
-                    itemgetter(2),
-                    pipe(
-                        dispatch(
-                            itemgetter(3),
-                            pipe(
-                                dispatch(
-                                    itemgetter(4), itemgetter(5),
-                                ),
-                                tuple,
-                                pformat,
-                            ),
-                        ),
-                        starapply(save_file),
-                        # TODO: 打屏“保存调试信息成功。”
-                    )
-                ),
-            ),
-        )
+        'stat_time', 'args', stat_time
     ),
     # stat_absent
     (
@@ -1630,7 +1615,7 @@ GRAPH_MAIN = make_graph(
     (
         'fill_total_absent_commands',
         ('total_absent_sheet', 'total_absent_commands'),
-        fill_worksheet_commands
+        do_fill_worksheet_commands
     ),
     (
         'stat_absent',
