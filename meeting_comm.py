@@ -208,6 +208,35 @@ def unique_justseen(iterable, key=None):
 ##########  ##########
 
 
+# 展开groupby
+expand_groupby = pipe(
+    partial(
+        map,
+        pipe(
+            dispatch(
+                itemgetter(0),
+                pipe(itemgetter(1), tuple),
+            ),
+            tuple,
+        ),
+    ),
+)
+
+# 字典化groupby
+dict_groupby = pipe(
+    partial(
+        map,
+        pipe(
+            dispatch(
+                itemgetter(0),
+                pipe(itemgetter(1), dict),
+            ),
+            tuple,
+        ),
+    ),
+)
+
+
 class Chain(tuple):
     """顺序调用链。"""
 

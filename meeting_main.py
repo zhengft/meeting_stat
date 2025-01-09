@@ -2,7 +2,7 @@
 
 import argparse
 
-from meeting_summary_workbook import main_process
+from meeting_summary_workbook import main_process, stat_time
 
 
 def main():
