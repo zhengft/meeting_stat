@@ -12,7 +12,7 @@ from itertools import (
     chain, filterfalse, groupby, repeat
 )
 from operator import (
-    attrgetter, itemgetter, lt, methodcaller
+    attrgetter, eq, itemgetter, lt, methodcaller
 )
 from pprint import pformat
 from typing import Dict, Iterator, NamedTuple, Tuple
@@ -30,7 +30,7 @@ from meeting_comm import (
     debug, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
     MEETING_ATTENDANCE_FILENAME,
     constant, cross, dispatch, ensure, identity, if_, invoke, pipe,
-    side_effect, starapply, tuple_args,
+    side_effect, starapply, to_stream, tuple_args,
     dict_groupby, expand_groupby,
     save_file,
     unique_justseen,
@@ -206,15 +206,38 @@ def generate_mismatched_command(idx: int,
 
 
 # 生成没有匹配的出席信息表填充指令
-# dict[str, AttendanceInfos] -> Tuple[FillCommand, ...]
+# Iterator[Tuple[str, AttendanceInfos], ...] -> Tuple[FillCommand, ...]
 generate_mismatched_commands = pipe(
-    methodcaller('items'),
     partial(map,
-        cross(
-            identity,
-            pipe(summarize_attendance_time, timedelta_to_time),
+        pipe(
+            if_(
+                pipe(itemgetter(0), partial(eq, '(None)')),
+                pipe(
+                    cross(
+                        repeat,
+                        partial(
+                            map,
+                            pipe(
+                                to_stream,
+                                summarize_attendance_time,
+                                timedelta_to_time
+                            )
+                        ),
+                    ),
+                    starapply(zip),
+                    tuple,
+                ),
+                pipe(
+                    cross(
+                        identity,
+                        pipe(summarize_attendance_time, timedelta_to_time),
+                    ),
+                    to_stream,
+                ),
+            ),
         ),
     ),
+    chain.from_iterable,
     partial(enumerate, start=2),
     partial(map, starapply(generate_mismatched_command)),
     chain.from_iterable,
@@ -353,7 +376,7 @@ def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
     """匹配个人信息和参会信息。"""
     if personeel_info.formal_name in attendance_info.nickname:
         return True
-    if personeel_info.formal_name in attendance_info.norm_name:
+    if personeel_info.formal_name in attendance_info.meeting_name:
         return True
     return False
 
@@ -499,10 +522,12 @@ def generate_attendance_infos_fill_commands(team_attendance_infos: TeamAttendanc
             )
 
 
-
 def fill_mismatched_attendance_infos(mismatched_attendance_infos: AttendanceInfos,
                                      summary_workbook: Workbook) -> Tuple[FillCommand, ...]:
     """填充未改名参会信息。"""
+    mismatched_attendance_infos = merge_attendance_infos(
+      mismatched_attendance_infos
+    ).items()
     mismatched_commands = generate_mismatched_commands(mismatched_attendance_infos)
     mismatched_sheet = summary_workbook[MISMATCHED_SHEET_NAME]
     fill_mismatched_commands = do_fill_worksheet_commands(mismatched_sheet, mismatched_commands)
@@ -550,7 +575,7 @@ def stat_time(args: Namespace):
         team_attendance_infos, team_mapping
     )
 
-    mismatched_attendance_infos = merge_attendance_infos(
+    mismatched_attendance_infos = tuple(
         sorted(
             stat_mismatched_attendance_infos(personeel_infos, attendance_infos),
             key=itemgetter(0)
