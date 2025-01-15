@@ -14,7 +14,6 @@ from itertools import (
 from operator import (
     attrgetter, eq, itemgetter, lt, methodcaller
 )
-from pprint import pformat
 from typing import Dict, Iterator, NamedTuple, Tuple
 
 from openpyxl import Workbook, load_workbook
@@ -24,7 +23,8 @@ from meeting_attendance_workbook import (
     AttendanceInfo, AttendanceInfos, DETAIL_OF_MEMBER_ATTENDANCE,
     does_attendance_detail_info_intersect,
     normalize_attendance_detail_info_time, merge_attendance_infos,
-    parse_attendance_detail_sheet, summarize_attendance_time,
+    parse_attendance_detail_sheet, partition_attendance_infos,
+    summarize_attendance_time,
 )
 from meeting_comm import (
     debug, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
@@ -32,7 +32,6 @@ from meeting_comm import (
     constant, cross, dispatch, ensure, identity, if_, invoke, pipe,
     side_effect, starapply, to_stream, tuple_args,
     dict_groupby, expand_groupby,
-    save_file,
     unique_justseen,
 )
 
@@ -382,15 +381,22 @@ def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
 
 
 def stat_personeel_attendance_infos(personeel_info: PersoneelInfo,
-                                    attendance_infos: AttendanceInfos) -> Iterator[AttendanceInfo]:
+                                    attendance_infos: dict[str, AttendanceInfos]
+                                    ) -> Iterator[AttendanceInfo]:
     """统计个人参会详情。"""
-    for attendance_info in attendance_infos:
-        if match_personeel_info_and_attendance_info(personeel_info, attendance_info):
-            yield attendance_info
+    for _, one_attendance_infos in attendance_infos.items():
+        matched = any(
+            map(
+                partial(match_personeel_info_and_attendance_info, personeel_info),
+                one_attendance_infos
+            )
+        )
+        if matched:
+            yield from one_attendance_infos
 
 
 def stat_people_attendance_infos(personeel_infos: PersoneelInfos,
-                                 attendance_infos: AttendanceInfos,
+                                 attendance_infos: dict[str, AttendanceInfos],
                                  meeting_info: MeetingInfo,
                                  ) -> Iterator[PersoneelAttendanceInfo]:
     """统计个人参会详情。"""
@@ -401,7 +407,7 @@ def stat_people_attendance_infos(personeel_infos: PersoneelInfos,
             stat_personeel_attendance_infos(personeel_info, attendance_infos)
         )
         personeel_attendance_time = summarize_attendance_time(
-            personeel_attendance_infos
+            normalize_attendance_detail_infos(meeting_info)(personeel_attendance_infos)
         )
         is_attendanced = personeel_attendance_time >= enough_attendance_time
         yield PersoneelAttendanceInfo(
@@ -410,19 +416,12 @@ def stat_people_attendance_infos(personeel_infos: PersoneelInfos,
         )
 
 
-def stat_mismatched_attendance_infos(personeel_infos: PersoneelInfos,
-                                     attendance_infos: AttendanceInfos
+def stat_mismatched_attendance_infos(matched_attendance_infos: AttendanceInfos,
+                                     attendance_infos: dict[str, AttendanceInfos]
                                      ) -> Iterator[AttendanceInfo]:
     """统计没有匹配的参会信息。"""
-    for attendance_info in attendance_infos:
-        is_present = any(
-            map(
-                match_personeel_info_and_attendance_info,
-                personeel_infos,
-                repeat(attendance_info)
-            )
-        )
-        if not is_present:
+    for attendance_info in chain.from_iterable(attendance_infos.values()):
+        if attendance_info not in matched_attendance_infos:
             yield attendance_info
 
 
@@ -553,7 +552,6 @@ def stat_time(args: Namespace):
     summary_workbook_output_filepath = os.path.join(
         args.meeting, MEETING_SUMMARY_OUTPUT_FILENAME
     )
-    fill_time_output_filepath = os.path.join(args.meeting, 'fill_time_commands.txt')
     people_sheet = summary_workbook[PEOPLE_SHEET_NAME]
     personeel_infos, teams_order = parse_people_sheet(people_sheet)
     attendance_infos = parse_attendance_detail_sheet(
@@ -564,10 +562,19 @@ def stat_time(args: Namespace):
 
     print(f'会议时长为{meeting_info.meeting_time}分钟。')
     print(f'参会时间下限为{meeting_info.meeting_enough_time}分钟。')
-    attendance_infos = normalize_attendance_detail_infos(meeting_info)(attendance_infos)
+
+    attendance_infos = partition_attendance_infos(attendance_infos)
 
     people_attendance_infos = tuple(
-        stat_people_attendance_infos(personeel_infos, attendance_infos, meeting_info)
+        stat_people_attendance_infos(
+            personeel_infos, attendance_infos, meeting_info
+        )
+    )
+
+    matched_attendance_infos = set(
+        chain.from_iterable(
+            map(attrgetter('personeel_attendance_infos'), people_attendance_infos)
+        )
     )
 
     team_attendance_infos = classify_team_attendance_infos(people_attendance_infos)
@@ -577,7 +584,11 @@ def stat_time(args: Namespace):
 
     mismatched_attendance_infos = tuple(
         sorted(
-            stat_mismatched_attendance_infos(personeel_infos, attendance_infos),
+            normalize_attendance_detail_infos(meeting_info)(
+                stat_mismatched_attendance_infos(
+                    matched_attendance_infos, attendance_infos
+                )
+            ),
             key=itemgetter(0)
         )
     )
@@ -589,12 +600,6 @@ def stat_time(args: Namespace):
     print(f"保存'{summary_workbook_output_filepath}'文件成功。")
 
     return True
-
-    if args.debug:
-        save_file(
-            fill_time_output_filepath, pformat((fill_groups_commands, fill_mismatched_commands))
-        )
-        print("保存调试信息成功。")
 
 
 def main_process(args: Namespace):

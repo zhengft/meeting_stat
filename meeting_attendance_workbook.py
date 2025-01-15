@@ -5,13 +5,12 @@ import re
 from datetime import datetime, timedelta
 from functools import partial, reduce
 from itertools import groupby
-from operator import add, attrgetter, itemgetter, methodcaller
+from operator import add, attrgetter, methodcaller
 from typing import NamedTuple, Tuple
 
 from meeting_comm import (
     InvalidAttendanceInfo,
-    cross, debug, dispatch, identity, pipe, starapply, swap_args, tuple_args,
-    expand_groupby,
+    debug, pipe, swap_args, tuple_args, expand_groupby,
 )
 
 
@@ -142,6 +141,18 @@ def merge_attendance_infos(attendance_infos: AttendanceInfos) -> dict[str, Atten
     """合并同名的参会信息。"""
     return dict(
         expand_groupby(groupby(attendance_infos, key=attrgetter('origin_name')))
+    )
+
+
+def partition_attendance_infos(attendance_infos: AttendanceInfos) -> dict[str, AttendanceInfos]:
+    """划分参会信息。"""
+    return dict(
+        expand_groupby(
+            groupby(
+                sorted(attendance_infos, key=attrgetter('meeting_name')),
+                key=attrgetter('meeting_name')
+            )
+        )
     )
 
 
