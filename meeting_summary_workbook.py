@@ -18,6 +18,7 @@ from typing import Dict, Iterator, NamedTuple, Tuple
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
+from pypinyin import pinyin, Style
 
 from meeting_attendance_workbook import (
     AttendanceInfo, AttendanceInfos, DETAIL_OF_MEMBER_ATTENDANCE,
@@ -66,6 +67,22 @@ class PersoneelInfo(NamedTuple):
     def formal_name(self) -> str:
         """正式名称。"""
         return f'{self.team}{self.number}{self.name}'
+
+    @property
+    def formal_nick_name(self) -> str:
+        """正式昵称。"""
+        if len(self.name) >= 3:
+            nick_name = self.name[1:]
+        else:
+            nick_name = self.name
+        return f'{self.team}{self.number}{nick_name}'
+
+    @property
+    def formal_pinyin_name(self) -> str:
+        """正式拼音名称。"""
+        pinyin_team = ''.join(chain.from_iterable(pinyin(self.team, style=Style.FIRST_LETTER)))
+        pinyin_team = pinyin_team.upper()
+        return f'{pinyin_team}{self.number}{self.name}'
 
 
 PersoneelInfos = Tuple[PersoneelInfo, ...]
@@ -376,6 +393,14 @@ def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
     if personeel_info.formal_name in attendance_info.nickname:
         return True
     if personeel_info.formal_name in attendance_info.meeting_name:
+        return True
+    if personeel_info.formal_nick_name in attendance_info.nickname:
+        return True
+    if personeel_info.formal_nick_name in attendance_info.meeting_name:
+        return True
+    if personeel_info.formal_pinyin_name in attendance_info.nickname:
+        return True
+    if personeel_info.formal_pinyin_name in attendance_info.meeting_name:
         return True
     return False
 

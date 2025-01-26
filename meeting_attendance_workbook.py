@@ -67,7 +67,7 @@ def parse_fullname(fullname: str) -> Tuple[str, str]:
 # 标准化用户昵称
 # str -> str
 normalize_name = pipe(
-    partial(re.sub, r' |_|-|，', ''),
+    partial(re.sub, r' |_|-|，|~|', ''),
     partial(re.sub, r'\d+', pipe(methodcaller('group', 0), int, str)),
 )
 
