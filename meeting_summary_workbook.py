@@ -14,7 +14,7 @@ from itertools import (
 from operator import (
     attrgetter, eq, itemgetter, lt, methodcaller
 )
-from typing import Dict, Iterator, NamedTuple, Tuple
+from typing import Dict, Iterator, List, NamedTuple, Tuple
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
@@ -28,12 +28,11 @@ from meeting_attendance_workbook import (
     summarize_attendance_time,
 )
 from meeting_comm import (
-    debug, MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
+    MEETING_SUMMARY_FILENAME, MEETING_SUMMARY_OUTPUT_FILENAME,
     MEETING_ATTENDANCE_FILENAME,
     constant, cross, dispatch, ensure, identity, if_, invoke, pipe,
     side_effect, starapply, to_stream, tuple_args,
     dict_groupby, expand_groupby,
-    unique_justseen,
 )
 
 
@@ -59,9 +58,14 @@ BORDER = Border(
 
 class PersoneelInfo(NamedTuple):
     """人员信息。"""
-    name: str
+    name: str  # 姓名
     team: str  # 小组
     number: int  # 小组编号
+    
+    @property
+    def team_number(self) -> str:
+        """小组名+编号。"""
+        return f'{self.team}{self.number}'
 
     @property
     def formal_name(self) -> str:
@@ -145,20 +149,9 @@ convert_people_sheet = pipe(
 # Worksheet -> Tuple[PersoneelInfos, Tuple[int, str]]
 parse_people_sheet = pipe(
     convert_people_sheet,
-    dispatch(
-        pipe(
-            partial(filter, pipe(itemgetter(0), bool)),
-            partial(map, parse_personnel_info),
-            tuple
-        ),
-        pipe(
-            partial(map, itemgetter(2)),
-            unique_justseen,
-            enumerate,
-            tuple,
-        ),
-    ),
-    tuple,
+    partial(filter, pipe(itemgetter(0), bool)),
+    partial(map, parse_personnel_info),
+    tuple
 )
 
 # 转换会议信息为内部数据结构
@@ -365,26 +358,27 @@ do_fill_worksheet_commands = pipe(
 )
 
 
-# 标准化参会明细信息
-normalize_attendance_detail_infos = lambda meeting_info: pipe(
-    partial(
-        filter,
+def normalize_attendance_detail_infos(meeting_info: MeetingInfo):
+    """标准化参会明细信息。"""
+    return pipe(
         partial(
-            does_attendance_detail_info_intersect,
-            meeting_info.meeting_start_time,
-            meeting_info.meeting_end_time,
+            filter,
+            partial(
+                does_attendance_detail_info_intersect,
+                meeting_info.meeting_start_time,
+                meeting_info.meeting_end_time,
+            ),
         ),
-    ),
-    partial(
-        map,
         partial(
-            normalize_attendance_detail_info_time,
-            meeting_info.meeting_start_time,
-            meeting_info.meeting_end_time
-        )
-    ),
-    tuple,
-)
+            map,
+            partial(
+                normalize_attendance_detail_info_time,
+                meeting_info.meeting_start_time,
+                meeting_info.meeting_end_time
+            )
+        ),
+        tuple,
+    )
 
 
 def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
@@ -402,6 +396,15 @@ def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
         return True
     if personeel_info.formal_pinyin_name in attendance_info.meeting_name:
         return True
+
+    if personeel_info.team_number == attendance_info.nickname:
+        return True
+
+    if personeel_info.team[-1] == 'I':
+        return match_personeel_info_and_attendance_info(
+            personeel_info._replace(team=personeel_info.team[:-1]+'1'),
+            attendance_info
+        )
     return False
 
 
@@ -566,7 +569,17 @@ def fill_zone_attendance_infos(zone_attendance_infos: ZoneAttendanceInfos,
         do_fill_worksheet_commands(workbook[zone], fill_commands)
 
 
-def stat_time(args: Namespace):
+def overlaped(items: List) -> bool:
+    """是否重叠。"""
+    result = False
+    for idx_i in range(len(items)):
+        for idx_j in range(idx_i + 1, len(items)):
+            if items[idx_i] in items[idx_j] or items[idx_j] in items[idx_i]:
+                result = True
+    return result
+
+
+def stat_time(args: Namespace) -> bool:
     """统计参会时长。"""
     summary_workbook = load_workbook(
         os.path.join(args.meeting, MEETING_SUMMARY_FILENAME)
@@ -578,7 +591,7 @@ def stat_time(args: Namespace):
         args.meeting, MEETING_SUMMARY_OUTPUT_FILENAME
     )
     people_sheet = summary_workbook[PEOPLE_SHEET_NAME]
-    personeel_infos, teams_order = parse_people_sheet(people_sheet)
+    personeel_infos = parse_people_sheet(people_sheet)
     attendance_infos = parse_attendance_detail_sheet(
         attendance_workbook[DETAIL_OF_MEMBER_ATTENDANCE]
     )

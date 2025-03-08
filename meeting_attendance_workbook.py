@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""考勤数据工作簿。"""
+
 import re
 from datetime import datetime, timedelta
 from functools import partial, reduce
@@ -10,7 +12,7 @@ from typing import NamedTuple, Tuple
 
 from meeting_comm import (
     InvalidAttendanceInfo,
-    debug, pipe, swap_args, tuple_args, expand_groupby,
+    pipe, swap_args, tuple_args, expand_groupby,
 )
 
 
@@ -69,14 +71,34 @@ def parse_fullname(fullname: str) -> Tuple[str, str]:
 normalize_name = pipe(
     partial(re.sub, r' |_|-|，|~|', ''),
     partial(re.sub, r'\d+', pipe(methodcaller('group', 0), int, str)),
+    partial(re.sub, r'[Ａ-Ｚａ-ｚ０-９！-～]', lambda x: chr(ord(x.group(0)) - 65248)), # 全角字符转半角
 )
+
+# 城市映射
+CITY_MAPPING = {
+    '厦门': '厦',
+    '杭州': '杭',
+    '福州': '福',
+    '北京': '京',
+}
 
 
 def normalize_nickname(nickname: str) -> str:
     """标准化用户昵称。"""
     if len(nickname) < 2:
         return nickname
-    return nickname[0] + nickname[1].upper() + nickname[2:]
+    if nickname[0] == '卾':
+        first = '鄂'
+    else:
+        first = nickname[0]
+    if nickname[:2] == '厦门':
+        first = '厦'
+        second = nickname[2]
+        thrid = nickname[3:]
+    else:
+        second = nickname[1]
+        thrid = nickname[2:]
+    return first + second.upper() + thrid
 
 
 # 解析时间
