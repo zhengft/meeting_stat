@@ -380,68 +380,77 @@ def normalize_attendance_detail_infos(meeting_info: MeetingInfo):
         tuple,
     )
 
+class StatAttendanceInfos:
 
-def match_personeel_info_and_attendance_info(personeel_info: PersoneelInfo,
-                                             attendance_info: AttendanceInfo) -> bool:
-    """匹配个人信息和参会信息。"""
-    if personeel_info.formal_name in attendance_info.nickname:
-        return True
-    if personeel_info.formal_name in attendance_info.meeting_name:
-        return True
-    if personeel_info.formal_nick_name in attendance_info.nickname:
-        return True
-    if personeel_info.formal_nick_name in attendance_info.meeting_name:
-        return True
-    if personeel_info.formal_pinyin_name in attendance_info.nickname:
-        return True
-    if personeel_info.formal_pinyin_name in attendance_info.meeting_name:
-        return True
+    def __init__(self, name_match: bool = False):
+        self.name_match = name_match
 
-    if personeel_info.team_number == attendance_info.nickname:
-        return True
+    def match_personeel_info_and_attendance_info(self,
+                                                 personeel_info: PersoneelInfo,
+                                                 attendance_info: AttendanceInfo) -> bool:
+        """匹配个人信息和参会信息。"""
+        if personeel_info.formal_name in attendance_info.nickname:
+            return True
+        if personeel_info.formal_name in attendance_info.meeting_name:
+            return True
+        if personeel_info.formal_nick_name in attendance_info.nickname:
+            return True
+        if personeel_info.formal_nick_name in attendance_info.meeting_name:
+            return True
+        if personeel_info.formal_pinyin_name in attendance_info.nickname:
+            return True
+        if personeel_info.formal_pinyin_name in attendance_info.meeting_name:
+            return True
 
-    if personeel_info.team[-1] == 'I':
-        return match_personeel_info_and_attendance_info(
-            personeel_info._replace(team=personeel_info.team[:-1]+'1'),
-            attendance_info
-        )
-    return False
+        if personeel_info.team_number == attendance_info.nickname:
+            return True
+
+        if self.name_match:
+            if personeel_info.name == attendance_info.nickname:
+                return True
+            for idx in range(1, min(len(attendance_info.nickname)-1, 3)):
+                if personeel_info.name == attendance_info.nickname[idx:]:
+                    return True
+
+        return False
 
 
-def stat_personeel_attendance_infos(personeel_info: PersoneelInfo,
-                                    attendance_infos: dict[str, AttendanceInfos]
-                                    ) -> Iterator[AttendanceInfo]:
-    """统计个人参会详情。"""
-    for _, one_attendance_infos in attendance_infos.items():
-        matched = any(
-            map(
-                partial(match_personeel_info_and_attendance_info, personeel_info),
-                one_attendance_infos
+    def stat_personeel_attendance_infos(self,
+                                        personeel_info: PersoneelInfo,
+                                        attendance_infos: dict[str, AttendanceInfos],
+                                        ) -> Iterator[AttendanceInfo]:
+        """统计个人参会详情。"""
+        for _, one_attendance_infos in attendance_infos.items():
+            matched = any(
+                map(
+                    partial(self.match_personeel_info_and_attendance_info, personeel_info),
+                    one_attendance_infos
+                )
             )
-        )
-        if matched:
-            yield from one_attendance_infos
+            if matched:
+                yield from one_attendance_infos
 
 
-def stat_people_attendance_infos(personeel_infos: PersoneelInfos,
-                                 attendance_infos: dict[str, AttendanceInfos],
-                                 meeting_info: MeetingInfo,
-                                 ) -> Iterator[PersoneelAttendanceInfo]:
-    """统计个人参会详情。"""
-    enough_attendance_time = timedelta(minutes=meeting_info.meeting_enough_time)
+    def stat_people_attendance_infos(self,
+                                     personeel_infos: PersoneelInfos,
+                                     attendance_infos: dict[str, AttendanceInfos],
+                                     meeting_info: MeetingInfo,
+                                     ) -> Iterator[PersoneelAttendanceInfo]:
+        """统计个人参会详情。"""
+        enough_attendance_time = timedelta(minutes=meeting_info.meeting_enough_time)
 
-    for personeel_info in personeel_infos:
-        personeel_attendance_infos = tuple(
-            stat_personeel_attendance_infos(personeel_info, attendance_infos)
-        )
-        personeel_attendance_time = summarize_attendance_time(
-            normalize_attendance_detail_infos(meeting_info)(personeel_attendance_infos)
-        )
-        is_attendanced = personeel_attendance_time >= enough_attendance_time
-        yield PersoneelAttendanceInfo(
-            personeel_info, personeel_attendance_infos, personeel_attendance_time,
-            is_attendanced
-        )
+        for personeel_info in personeel_infos:
+            personeel_attendance_infos = tuple(
+                self.stat_personeel_attendance_infos(personeel_info, attendance_infos)
+            )
+            personeel_attendance_time = summarize_attendance_time(
+                normalize_attendance_detail_infos(meeting_info)(personeel_attendance_infos)
+            )
+            is_attendanced = personeel_attendance_time >= enough_attendance_time
+            yield PersoneelAttendanceInfo(
+                personeel_info, personeel_attendance_infos, personeel_attendance_time,
+                is_attendanced
+            )
 
 
 def stat_mismatched_attendance_infos(matched_attendance_infos: AttendanceInfos,
@@ -569,12 +578,12 @@ def fill_zone_attendance_infos(zone_attendance_infos: ZoneAttendanceInfos,
         do_fill_worksheet_commands(workbook[zone], fill_commands)
 
 
-def overlaped(items: List) -> bool:
+def overlapped(items: List) -> bool:
     """是否重叠。"""
     result = False
     for idx_i in range(len(items)):
         for idx_j in range(idx_i + 1, len(items)):
-            if items[idx_i] in items[idx_j] or items[idx_j] in items[idx_i]:
+            if items[idx_i] == items[idx_j]:
                 result = True
     return result
 
@@ -604,8 +613,10 @@ def stat_time(args: Namespace) -> bool:
     attendance_infos = partition_attendance_infos(attendance_infos)
 
     people_attendance_infos = tuple(
-        stat_people_attendance_infos(
-            personeel_infos, attendance_infos, meeting_info
+        StatAttendanceInfos(
+            not overlapped(list(map(attrgetter('name'), personeel_infos)))
+        ).stat_people_attendance_infos(
+            personeel_infos, attendance_infos, meeting_info,
         )
     )
 

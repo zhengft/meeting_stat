@@ -91,13 +91,15 @@ def normalize_nickname(nickname: str) -> str:
         first = '鄂'
     else:
         first = nickname[0]
-    if nickname[:2] == '厦门':
-        first = '厦'
+    if nickname[:2] in CITY_MAPPING:
+        first = CITY_MAPPING[nickname[:2]]
         second = nickname[2]
         thrid = nickname[3:]
     else:
         second = nickname[1]
         thrid = nickname[2:]
+    if second == '1':  # I和1形似，修正为I
+        second = 'I'
     return first + second.upper() + thrid
 
 
